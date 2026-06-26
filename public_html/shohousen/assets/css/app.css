@@ -1,0 +1,506 @@
+/* =========================================================
+   処方箋システム 共通CSS
+   対象: public_html/shohousen/assets/css/app.css
+
+   目的:
+   - 全画面共通の色・余白・カード・ボタン・フォーム・一覧表を管理する。
+   - 画面固有CSSはまだ分離していないため、現時点ではこの app.css が全画面共通CSS。
+
+   運用ルール:
+   - 共通部品はこのファイルに置く。
+   - 処方箋読込専用、在庫管理専用、管理画面専用のCSSが増えたら別ファイル化する。
+   - クラス名を追加する場合は、必ず「何に使うか」のコメントを付ける。
+   ========================================================= */
+
+/* =========================================================
+   01. デザイン変数
+   ========================================================= */
+
+/* :root: 全画面共通の色・角丸・影を定義するCSS変数。テーマ変更時は基本ここを変更する。 */
+:root {
+  --bg: #f6f9fd;
+  --card: #ffffff;
+  --line: #d8e3f2;
+  --line-strong: #96bef4;
+  --text: #142033;
+  --muted: #64748b;
+  --primary: #0f66d0;
+  --primary-dark: #074ea7;
+  --danger: #e95454;
+  --success: #13a85b;
+  --warn: #e7921b;
+  --radius: 14px;
+  --shadow: 0 10px 30px rgba(24, 76, 142, .08);
+}
+
+/* =========================================================
+   02. 全体リセット・基本タグ
+   ========================================================= */
+
+/* *: 全要素の幅計算を安定させる。padding/border込みでwidthを計算する。 */
+* { box-sizing: border-box; }
+
+/* html: 全画面共通のフォント・文字色・背景色。 */
+html { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--text); background: var(--bg); }
+
+/* body: ブラウザ標準余白を消し、画面高さを最低100vhにする。 */
+body { margin: 0; min-height: 100vh; }
+
+/* a: リンクの色と下線をリセットし、ボタン/カードリンクでも見た目が崩れないようにする。 */
+a { color: inherit; text-decoration: none; }
+
+/* label: 入力フォームの項目名と入力欄を縦並びにする共通フォームラベル。 */
+label { display: grid; gap: 7px; font-size: 13px; font-weight: 700; color: #334155; }
+
+/* input, select: テキスト入力・日付入力・プルダウンの共通見た目。 */
+input, select { width: 100%; min-height: 40px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 7px; background: #fff; font: inherit; }
+
+/* input[readonly]: 読み取り専用入力欄。編集不可であることが分かる薄い背景にする。 */
+input[readonly] { background: #f9fbfe; }
+
+/* =========================================================
+   03. 共通ヘッダー・共通レイアウト
+   使用画面: 全画面 / private/shohousen/app/View.php
+   ========================================================= */
+
+/* .app-header: 全画面上部の固定ヘッダー。ブランド名、ナビ、ログイン状態を表示する外枠。 */
+.app-header { position: sticky; top: 0; z-index: 10; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 24px; background: rgba(255,255,255,.92); border-bottom: 1px solid var(--line); backdrop-filter: blur(10px); }
+
+/* .brand: ヘッダー左側のサービス名表示。アイコンとサービス名を横並びにする。 */
+.brand { display: inline-flex; align-items: center; gap: 8px; font-weight: 800; }
+
+/* .brand-icon: ヘッダー左側のサービスアイコン。青背景の小さい角丸アイコン。 */
+.brand-icon { display: grid; place-items: center; width: 26px; height: 26px; color: #fff; background: var(--primary); border-radius: 7px; }
+
+/* .header-nav: ヘッダー右側のナビゲーション。ログイン/ログアウト/メニューリンク表示用。 */
+.header-nav { display: flex; align-items: center; gap: 18px; color: var(--muted); font-size: 14px; }
+
+/* .app-main: 全ページ本文の最大幅と上下余白を統一するメインコンテナ。 */
+.app-main { width: min(1180px, calc(100% - 32px)); margin: 0 auto; padding: 28px 0 64px; }
+
+/* .card: 全画面共通の白いカード外枠。枠線、角丸、影を付ける基本部品。 */
+.card { background: var(--card); border: 1px solid var(--line-strong); border-radius: var(--radius); box-shadow: var(--shadow); }
+
+/* =========================================================
+   04. TOP画面
+   使用画面: public_html/shohousen/index.php
+   ========================================================= */
+
+/* .hero: TOP画面上部のメインビジュアル領域。説明文と右側イメージを2カラム表示する外枠。 */
+.hero { display: grid; grid-template-columns: 1.05fr .95fr; gap: 24px; min-height: 360px; padding: 36px; overflow: hidden; }
+
+/* .hero-copy: TOP画面の左側文章エリア。現時点では .hero のグリッド内で個別スタイルなし。 */
+/* .hero-copy { } */
+
+/* .eyebrow: TOP画面などで使う小さい強調見出し。画面上部の補助ラベル用。 */
+.eyebrow { margin: 0 0 12px; color: var(--primary); font-weight: 700; }
+
+/* .hero h1: TOP画面の大見出し。スマホ/PCで自動的に文字サイズが変わる。 */
+.hero h1 { margin: 0; font-size: clamp(28px, 4vw, 44px); line-height: 1.25; letter-spacing: .02em; }
+
+/* .hero p: TOP画面の説明文。読みやすく行間を広げる。 */
+.hero p { line-height: 1.8; }
+
+/* .hero-visual: TOP画面右側のデモビジュアル領域。淡い背景のプレビュー枠。 */
+.hero-visual { display: grid; place-items: center; min-height: 260px; border-radius: 12px; background: linear-gradient(135deg, #eaf3ff, #ffffff); }
+
+/* .photo-card: TOP画面右側の処方箋/受付プレビュー風カード。 */
+.photo-card { display: flex; align-items: center; gap: 16px; width: min(360px, 100%); padding: 24px; background: rgba(255,255,255,.88); border: 1px solid var(--line); border-radius: 16px; }
+
+/* .photo-face: TOP画面右側カード内の大きな絵文字アイコン。 */
+.photo-face { font-size: 72px; }
+
+/* .photo-card span: TOP画面右側カード内の補足テキスト。 */
+.photo-card span { display: block; color: var(--muted); font-size: 14px; margin-top: 6px; }
+
+/* .top-grid: TOP画面下部のニュース/サポートカードを2カラムで並べる領域。 */
+.top-grid { display: grid; grid-template-columns: 1.4fr .8fr; gap: 24px; margin-top: 24px; }
+
+/* .top-grid .card: TOP画面下部カード専用の内側余白。 */
+.top-grid .card { padding: 24px; }
+
+/* .support-card: TOP画面のサポート案内カード。現時点では .top-grid .card の共通スタイルで表示。 */
+/* .support-card { } */
+
+/* .news-list: TOP画面のお知らせ一覧。リスト記号を消して行間を整える。 */
+.news-list { list-style: none; padding: 0; margin: 0; display: grid; gap: 14px; }
+
+/* .news-list time: TOP画面お知らせの日付。日付幅を揃えて本文を読みやすくする。 */
+.news-list time { display: inline-block; width: 104px; color: var(--muted); }
+
+/* =========================================================
+   05. ボタン・リンク系
+   使用画面: 全画面
+   ========================================================= */
+
+/* .button-row: 複数ボタンを横並びにする外枠。TOP、確認画面、QR画面などで使用。 */
+.button-row { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 24px; }
+
+/* .button-row.end: ボタン行を右寄せにする。保存/戻るなど画面下部アクションで使用。 */
+.button-row.end { justify-content: flex-end; }
+
+/* .button-row.center: ボタン行を中央寄せにする。QR表示後の終了ボタンなどで使用。 */
+.button-row.center { justify-content: center; }
+
+/* .btn: 全画面共通ボタン。通常ボタンの基本形。 */
+.btn { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 22px; border: 1px solid var(--line-strong); border-radius: 8px; font-weight: 700; cursor: pointer; background: #fff; }
+
+/* .btn.primary: 主要アクションボタン。ログイン、保存、選択する等の主操作で使用。 */
+.btn.primary { color: #fff; background: linear-gradient(180deg, #1475e7, var(--primary)); border-color: var(--primary); }
+
+/* .btn.primary:hover: 主要ボタンにマウスを乗せた時の色。 */
+.btn.primary:hover { background: var(--primary-dark); }
+
+/* .btn.ghost: 補助アクションボタン。戻る、修正、一覧へ戻る等で使用。 */
+.btn.ghost { color: var(--primary); background: #fff; }
+
+/* .btn.danger: 危険操作ボタン。削除など取り消しにくい操作で使用。 */
+.btn.danger { color: #fff; background: var(--danger); border-color: var(--danger); }
+
+/* .btn.wide: ログイン画面などでボタンを横幅100%に広げる。 */
+.btn.wide { width: 100%; }
+
+/* .text-link: ログイン画面などの下部テキストリンク。中央寄せの小さいリンク。 */
+.text-link { display: block; margin-top: 14px; color: var(--primary); text-align: center; font-size: 13px; }
+
+/* .back-link: ページタイトル横の戻るボタン。角丸の小さい四角ボタン。 */
+.back-link { display: grid; place-items: center; width: 42px; height: 42px; border: 1px solid var(--line); border-radius: 12px; background: #fff; }
+
+/* .detail-link: 一覧表から詳細画面へ移動するリンク。矢印アイコン風に大きく表示する。 */
+.detail-link { font-size: 24px; color: var(--primary); }
+
+/* .icon-btn: メニュー画面右側などで使う丸型アイコンボタン。 */
+.icon-btn { margin-left: auto; width: 42px; height: 42px; border: 0; border-radius: 999px; background: #f1f5f9; cursor: pointer; }
+
+/* =========================================================
+   06. ログイン・認証画面
+   使用画面: login.php / admin_login.php
+   ========================================================= */
+
+/* .auth-wrap: ログインカードを画面中央に配置する外枠。 */
+.auth-wrap { display: grid; place-items: center; min-height: calc(100vh - 170px); }
+
+/* .auth-card: ログイン/管理者ログインの白いカード本体。 */
+.auth-card { width: min(430px, 100%); padding: 30px; }
+
+/* .auth-card h1: ログインカード内の見出し。上余白を詰める。 */
+.auth-card h1 { margin-top: 0; }
+
+/* .auth-card label + label, .definition-list label + label: フォーム項目が連続する時の縦余白。 */
+.auth-card label + label, .definition-list label + label { margin-top: 14px; }
+
+/* .check-row: ログイン画面のチェックボックス行。横並びで表示する。 */
+.check-row { display: flex; align-items: center; grid-template-columns: none; gap: 8px; margin: 16px 0; color: var(--muted); font-weight: 600; }
+
+/* .check-row input: チェックボックスだけ通常入力欄の幅指定を解除する。 */
+.check-row input { width: auto; min-height: auto; }
+
+/* .notice: 補足案内メッセージ。デモログイン情報や注意書きで使用。 */
+/* .alert: エラー/情報メッセージの共通外枠。 */
+.notice, .alert { margin-top: 18px; padding: 14px; border-radius: 10px; font-size: 13px; line-height: 1.7; }
+
+/* .notice, .alert.info: 情報メッセージ。青系の背景で案内を表示する。 */
+.notice, .alert.info { background: #eef6ff; color: #28507d; }
+
+/* .alert.error: エラーメッセージ。ログイン失敗や入力不備を赤系で表示する。 */
+.alert.error { background: #fff0f0; color: #b42318; }
+
+/* =========================================================
+   07. ページタイトル・見出し
+   使用画面: 管理画面 / メニュー / 処方箋 / 一覧 / 詳細
+   ========================================================= */
+
+/* .page-title: 各ページ上部のタイトル領域。h1/h2と説明文をまとめる外枠。 */
+.page-title { margin: 0 0 18px; }
+
+/* .page-title h1, .page-title h2: ページタイトル内の見出し。余白を統一する。 */
+.page-title h1, .page-title h2 { margin: 0 0 6px; }
+
+/* .page-title p: ページタイトル内の説明文。薄い文字色で補足表示する。 */
+.page-title p { margin: 0; color: var(--muted); }
+
+/* .page-title.with-action: 右側にボタンを置くページタイトル。ユーザー管理などで使用。 */
+/* .page-title.with-back: 左側/右側に戻るリンクを置くページタイトル。処方箋読込などで使用。 */
+.page-title.with-action, .page-title.with-back { display: flex; justify-content: space-between; align-items: center; gap: 16px; }
+
+/* =========================================================
+   08. ユーザーメニュー・機能選択
+   使用画面: menu.php / admin_home.php
+   ========================================================= */
+
+/* .user-summary: メニュー上部のログインユーザー情報カード。 */
+.user-summary { display: flex; align-items: center; gap: 16px; padding: 18px; margin-bottom: 24px; }
+
+/* .user-summary h1: ユーザー情報カード内の名前/見出し。 */
+.user-summary h1 { margin: 0; font-size: 20px; }
+
+/* .user-summary p: ユーザー情報カード内のメール/所属などの補足。 */
+.user-summary p { margin: 4px 0 0; color: var(--muted); }
+
+/* .avatar: ユーザー情報カード内の丸いアイコン表示。 */
+.avatar { display: grid; place-items: center; width: 52px; height: 52px; border-radius: 999px; background: #e9f3ff; font-size: 26px; }
+
+/* .menu-grid: メニュー機能カードをグリッド表示する外枠。通常は4カラム。 */
+.menu-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 16px; }
+
+/* .admin-grid: 管理者ホームのメニューグリッド。管理機能は3カラム表示にする。 */
+.admin-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+
+/* .feature-card: 機能選択カード。処方箋読込、受付一覧、ユーザー管理などの大きいボタン。 */
+.feature-card { min-height: 134px; display: grid; place-items: center; gap: 8px; text-align: center; padding: 18px; background: #fff; border: 1px solid var(--line); border-radius: 14px; box-shadow: var(--shadow); }
+
+/* .feature-card span: 機能カード内の大きいアイコン。 */
+.feature-card span { font-size: 34px; }
+
+/* .feature-card strong: 機能カード内の機能名。 */
+.feature-card strong { font-size: 15px; }
+
+/* .feature-card em: 機能カード内の補足説明。小さく薄い文字で表示する。 */
+.feature-card em { color: var(--muted); font-size: 12px; font-style: normal; line-height: 1.5; }
+
+/* .feature-card.disabled: 未契約/未使用機能カード。押せないことが分かるよう半透明にする。 */
+.feature-card.disabled { opacity: .62; cursor: not-allowed; }
+
+/* .bottom-actions: メニュー画面下部のヘルプ/検索/ログアウト等のリンク行。 */
+.bottom-actions { display: flex; justify-content: center; gap: 22px; margin-top: 22px; padding: 14px; color: var(--muted); font-size: 14px; }
+
+/* =========================================================
+   09. 処方箋読込画面
+   使用画面: prescription_scan.php
+   ========================================================= */
+
+/* .scan-grid: カメラ起動カードとファイル選択カードを2カラムで並べる外枠。 */
+.scan-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
+
+/* .scan-card: 処方箋読込の選択カード。カメラ/ファイル選択の大きい操作ボタン。 */
+.scan-card { min-height: 230px; display: grid; place-items: center; align-content: center; gap: 12px; padding: 28px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(180deg, #f7fbff, #fff); color: var(--text); cursor: pointer; text-align: center; font: inherit; }
+
+/* .scan-card em: 読込カード内の補足文。 */
+.scan-card em { color: var(--muted); font-style: normal; font-size: 13px; }
+
+/* .scan-icon: 読込カード内の大きなアイコン枠。 */
+.scan-icon { display: grid; place-items: center; width: 76px; height: 76px; border-radius: 18px; background: #e9f3ff; color: var(--primary); font-size: 42px; }
+
+/* .file-card input[type="file"]: ファイル選択カード内のファイル入力欄。横幅を制限する。 */
+.file-card input[type="file"] { max-width: 280px; }
+
+/* .hint: 処方箋読込画面下部の注意文。グリッド全幅で中央表示する。 */
+.hint { grid-column: 1 / -1; text-align: center; color: var(--muted); }
+
+/* =========================================================
+   10. 解析結果確認・処方箋詳細カード
+   使用画面: prescription_result.php / reception_detail.php
+   ========================================================= */
+
+/* .result-card: 解析結果、修正画面、詳細画面の白い本文カード。 */
+.result-card { padding: 22px; }
+
+/* .info-columns: 患者情報と保険/医療機関情報を2カラムで並べる外枠。 */
+.info-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; margin-bottom: 18px; }
+
+/* .result-card h2: 結果カード内の小見出し。患者情報、処方薬などのセクション名。 */
+.result-card h2 { margin: 8px 0 12px; font-size: 16px; }
+
+/* .definition-list: 解析結果の項目名/内容をまとめる枠。患者情報などで使用。 */
+.definition-list { border: 1px solid var(--line); border-radius: 10px; padding: 12px; }
+
+/* .med-list: 処方薬一覧の行を縦に並べる外枠。 */
+.med-list { display: grid; gap: 10px; }
+
+/* .med-row: 処方薬一覧の1行。番号、薬品名、用法用量、日数を横並びにする。 */
+.med-row { display: grid; grid-template-columns: 36px 1.5fr 1.3fr 90px; align-items: center; gap: 10px; }
+
+/* =========================================================
+   11. 修正画面・編集フォーム
+   使用画面: prescription_edit.php
+   ========================================================= */
+
+/* .form-grid: 修正画面のフォーム項目を縦に並べる基本グリッド。 */
+.form-grid { display: grid; gap: 14px; }
+
+/* .form-grid.two: フォームを2カラムにする。患者情報・保険情報などで使用。 */
+.form-grid.two { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+/* .span2: 2カラムフォーム内で項目を横幅いっぱいに広げる。住所や備考などで使用。 */
+.span2 { grid-column: span 2; }
+
+/* .edit-med-list: 修正画面の処方薬編集行を縦に並べる外枠。 */
+.edit-med-list { display: grid; gap: 12px; }
+
+/* .edit-med-row: 修正画面の処方薬1行。番号、薬品名、用法、日数、在庫状態を並べる。 */
+.edit-med-row { display: grid; grid-template-columns: 34px 1.5fr 1.2fr 90px 130px; gap: 10px; align-items: end; padding: 12px; border: 1px solid var(--line); border-radius: 10px; }
+
+/* .row-no: 処方薬行の番号表示。丸い番号バッジ。 */
+.row-no { display: grid; place-items: center; width: 28px; height: 28px; border-radius: 999px; background: #eef6ff; color: var(--primary); font-weight: 800; }
+
+/* .legend: 修正画面下部の凡例行。採用薬/在庫あり/在庫少などの意味を表示する。 */
+.legend { display: flex; gap: 14px; align-items: center; margin-top: 14px; color: var(--muted); font-size: 13px; }
+
+/* .dot: 凡例で使う小さい丸アイコンの基本形。 */
+.dot { width: 9px; height: 9px; display: inline-block; border-radius: 999px; }
+
+/* .dot.adopted: 採用薬を示す凡例ドット。 */
+.dot.adopted { background: var(--success); }
+
+/* .dot.stock: 在庫ありを示す凡例ドット。 */
+.dot.stock { background: var(--primary); }
+
+/* .dot.low: 在庫少を示す凡例ドット。 */
+.dot.low { background: var(--warn); }
+
+/* =========================================================
+   12. 受付一覧・検索・テーブル
+   使用画面: receptions.php / admin_users.php / reception_detail.php
+   ========================================================= */
+
+/* .search-panel: 受付データ一覧の検索条件エリア。日付、名前、医療機関コード等を横並びにする。 */
+.search-panel { display: grid; grid-template-columns: 160px auto 160px 1fr 1fr auto auto; gap: 12px; align-items: end; padding: 18px; margin-bottom: 18px; }
+
+/* .table-card: 一覧表を入れるカード。横スクロールに対応する。 */
+.table-card { padding: 0; overflow: auto; }
+
+/* .data-table: 一覧テーブルの基本形。受付一覧、ユーザー一覧、処方薬詳細で使用。 */
+.data-table { width: 100%; border-collapse: collapse; min-width: 740px; }
+
+/* .data-table th, .data-table td: テーブルのヘッダー/セル共通の余白と罫線。 */
+.data-table th, .data-table td { padding: 14px 16px; border-bottom: 1px solid var(--line); text-align: left; font-size: 14px; }
+
+/* .data-table th: テーブルヘッダー。薄い背景で見出し行を分かりやすくする。 */
+.data-table th { background: #f8fbff; color: #42526b; font-size: 13px; }
+
+/* .data-table.compact: 詳細画面内など、横幅を広げすぎたくない小型テーブル。 */
+.data-table.compact { min-width: 0; }
+
+/* .status: 受付一覧の状態表示。太字で強調する基本形。 */
+.status { font-weight: 800; }
+
+/* .status.completed: 完了状態。緑色で表示する。 */
+.status.completed { color: var(--success); }
+
+/* .status.needs_review: 要確認状態。警告色で表示する。 */
+.status.needs_review { color: var(--warn); }
+
+/* =========================================================
+   13. 詳細表示テーブル
+   使用画面: reception_detail.php
+   ========================================================= */
+
+/* .info-table: 受付データ詳細の項目表示テーブル。項目名と値を2カラムで表示する。 */
+.info-table { display: grid; gap: 0; border: 1px solid var(--line); border-radius: 10px; overflow: hidden; margin-bottom: 16px; }
+
+/* .info-table div: 詳細テーブルの1行。左に項目名、右に値を表示する。 */
+.info-table div { display: grid; grid-template-columns: 170px 1fr; border-bottom: 1px solid var(--line); }
+
+/* .info-table div:last-child: 詳細テーブル最終行の下罫線を消す。 */
+.info-table div:last-child { border-bottom: 0; }
+
+/* .info-table span, .info-table strong: 詳細テーブル内の項目名/値の余白。 */
+.info-table span, .info-table strong { padding: 12px; }
+
+/* .info-table span: 詳細テーブル左側の項目名セル。薄い背景で区別する。 */
+.info-table span { background: #f8fbff; color: var(--muted); }
+
+/* =========================================================
+   14. QR表示画面
+   使用画面: qr.php
+   ========================================================= */
+
+/* .qr-wrap: QR表示画面の中央カード。QRと説明文を中央寄せにする。 */
+.qr-wrap { width: min(520px, 100%); margin: 0 auto; padding: 28px; text-align: center; }
+
+/* .qr-box: 擬似QRの外枠。21x21のマス目でQR風に表示する。 */
+.qr-box { display: grid; grid-template-columns: repeat(21, 1fr); gap: 2px; width: min(300px, 70vw); aspect-ratio: 1; margin: 24px auto; padding: 14px; border: 1px solid var(--line); background: #fff; }
+
+/* .qr-box i: 擬似QRの1マス。通常は白。 */
+.qr-box i { background: #fff; }
+
+/* .qr-box i.on: 擬似QRの黒いマス。 */
+.qr-box i.on { background: #111827; }
+
+/* .qr-caption: QR画面下部の説明文。行間を広げて読みやすくする。 */
+.qr-caption { line-height: 1.7; }
+
+/* =========================================================
+   15. アクセシビリティ・補助
+   ========================================================= */
+
+/* .sr-only: 画面には見せずスクリーンリーダーには読ませる補助テキスト。検索フォームのラベル等で使用。 */
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
+
+/* =========================================================
+   16. タブレット/スマホ対応
+   ========================================================= */
+
+/* @media (max-width: 900px): タブレット幅以下のレイアウト調整。2カラム/4カラムを減らす。 */
+@media (max-width: 900px) {
+  /* .app-header: タブレット以下でヘッダー余白を少し狭くする。 */
+  .app-header { padding: 12px 16px; }
+
+  /* .header-nav: タブレット以下でヘッダーナビを小さく詰める。 */
+  .header-nav { gap: 10px; font-size: 12px; }
+
+  /* .hero, .top-grid, .info-columns, .scan-grid: タブレット以下では1カラムに落とす。 */
+  .hero, .top-grid, .info-columns, .scan-grid { grid-template-columns: 1fr; }
+
+  /* .menu-grid: タブレット以下では機能カードを2カラムにする。 */
+  .menu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  /* .search-panel: タブレット以下では検索条件を縦並びにする。 */
+  .search-panel { grid-template-columns: 1fr; }
+
+  /* .med-row, .edit-med-row, .form-grid.two: タブレット以下では処方薬行/フォームを1カラム化する。 */
+  .med-row, .edit-med-row, .form-grid.two { grid-template-columns: 1fr; }
+
+  /* .span2: 1カラム時は横幅拡張指定を解除する。 */
+  .span2 { grid-column: span 1; }
+
+  /* .button-row.end: タブレット以下では右寄せボタン行を横幅いっぱいに使う。 */
+  .button-row.end { justify-content: stretch; }
+
+  /* .button-row.end .btn: タブレット以下では右寄せボタン行の各ボタンを均等幅にする。 */
+  .button-row.end .btn { flex: 1; }
+}
+
+/* @media (max-width: 520px): スマホ幅のレイアウト調整。余白とカラムをさらに詰める。 */
+@media (max-width: 520px) {
+  /* .app-main: スマホ幅で本文左右余白と上余白を小さくする。 */
+  .app-main { width: calc(100% - 20px); padding-top: 16px; }
+
+  /* .hero, .auth-card, .result-card, .qr-wrap: スマホ幅で主要カードの内側余白を小さくする。 */
+  .hero, .auth-card, .result-card, .qr-wrap { padding: 18px; }
+
+  /* .menu-grid: スマホ幅では機能カードを1カラムにする。 */
+  .menu-grid { grid-template-columns: 1fr; }
+
+  /* .bottom-actions: スマホ幅では下部リンクを折り返し可能にする。 */
+  .bottom-actions { flex-wrap: wrap; }
+
+  /* .info-table div: スマホ幅では詳細テーブルの項目名/値を縦並びにする。 */
+  .info-table div { grid-template-columns: 1fr; }
+}
+
+/* =========================================================
+   追加: 処方箋AI読取MVP
+   使用画面: prescription_scan.php / prescription_result.php
+   ========================================================= */
+.scan-upload { padding: 22px; }
+.scan-layout { display: grid; grid-template-columns: .9fr 1.1fr; gap: 22px; align-items: stretch; }
+.scan-guide { display: grid; gap: 14px; align-content: start; }
+.scan-guide ul { margin: 0; padding-left: 1.2em; color: var(--muted); line-height: 1.8; }
+.camera-picker { position: relative; overflow: hidden; width: fit-content; }
+.camera-picker input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+.secondary-picker { margin-top: -4px; }
+.scan-preview-panel { display: grid; gap: 10px; }
+.scan-frame { min-height: 360px; display: grid; place-items: center; overflow: hidden; border: 2px dashed var(--line-strong); border-radius: 16px; background: #f8fbff; color: var(--muted); text-align: center; }
+.scan-frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
+.scan-quality { padding: 12px; border-radius: 10px; background: #eef6ff; color: #28507d; font-size: 13px; line-height: 1.6; }
+.hint.left { text-align: left; }
+.check-note p { margin: 0 0 10px; color: var(--muted); line-height: 1.7; }
+.ocr-med-row { grid-template-columns: 34px minmax(220px, 1.5fr) minmax(180px, 1.2fr) 90px 130px; }
+.candidate-note { display: block; margin-top: 6px; color: var(--primary); font-size: 12px; line-height: 1.4; }
+@media (max-width: 760px) {
+  .scan-layout, .info-columns { grid-template-columns: 1fr; }
+  .scan-frame { min-height: 260px; }
+  .ocr-med-row, .edit-med-row { grid-template-columns: 1fr; }
+  .row-no { width: 100%; }
+}
