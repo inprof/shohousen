@@ -61,6 +61,43 @@ final class PrescriptionCorrectionService
         return $result;
     }
 
+
+
+    public function persistCandidates(int $parseJobId, int $tenantId, array $normalized): void
+    {
+        $candidates = $normalized['_correction_candidates']['medications'] ?? [];
+        if (!$candidates) {
+            return;
+        }
+        $pdo = Db::branch();
+        try {
+            $pdo->prepare('DELETE FROM prescription_correction_candidates WHERE parse_job_id = :parse_job_id')
+                ->execute([':parse_job_id' => $parseJobId]);
+            $stmt = $pdo->prepare('INSERT INTO prescription_correction_candidates
+                (parse_job_id, company_uid, branch_uid, tenant_id, field_path, field_type, original_value, candidate_value, candidate_source, score, reason, was_selected, was_rejected, created_at)
+                VALUES (:parse_job_id, :company_uid, :branch_uid, :tenant_id, :field_path, :field_type, :original_value, :candidate_value, :candidate_source, :score, :reason, 0, 0, NOW())');
+            foreach ($candidates as $medCandidates) {
+                foreach (($medCandidates['drug_name'] ?? []) as $candidate) {
+                    $stmt->execute([
+                        ':parse_job_id' => $parseJobId,
+                        ':company_uid' => current_company_uid(),
+                        ':branch_uid' => current_branch_uid(),
+                        ':tenant_id' => $tenantId,
+                        ':field_path' => (string)($candidate['field_path'] ?? ''),
+                        ':field_type' => (string)($candidate['field_type'] ?? ''),
+                        ':original_value' => (string)($candidate['original_value'] ?? ''),
+                        ':candidate_value' => (string)($candidate['candidate_value'] ?? ''),
+                        ':candidate_source' => (string)($candidate['candidate_source'] ?? ''),
+                        ':score' => (float)($candidate['score'] ?? 0),
+                        ':reason' => (string)($candidate['reason'] ?? ''),
+                    ]);
+                }
+            }
+        } catch (Throwable) {
+            // 候補保存に失敗しても確認画面表示は継続する。
+        }
+    }
+
     /** @param array<int,array<string,mixed>> $candidates */
     private static function uniqueCandidates(array $candidates): array
     {

@@ -1,6 +1,6 @@
 <?php
 require_once dirname(__DIR__, 2) . '/private/shohousen/app/bootstrap.php';
-$user = Auth::requireLogin();
+$user = Auth::requireBranchSelected();
 $filters = [
     'from' => $_GET['from'] ?? '2024-05-01',
     'to' => $_GET['to'] ?? '2024-05-31',

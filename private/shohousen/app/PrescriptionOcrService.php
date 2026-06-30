@@ -8,6 +8,7 @@ final class PrescriptionOcrService
         private readonly OpenAiPrescriptionClient $openai = new OpenAiPrescriptionClient(),
         private readonly PrescriptionKnowledgeService $knowledge = new PrescriptionKnowledgeService(),
         private readonly PrescriptionCorrectionService $correction = new PrescriptionCorrectionService(),
+        private readonly PrescriptionTemplateDetector $templateDetector = new PrescriptionTemplateDetector(),
     ) {}
 
     public function analyzeUploaded(array $file, array $user, string $sourceType): int
@@ -50,8 +51,15 @@ final class PrescriptionOcrService
         $this->saveCaptureQuality($jobId, $tenantId, $companyUid, $branchUid, $stored);
 
         $templateStart = microtime(true);
-        $template = $this->knowledge->findTemplate(null);
+        $detectedTemplateMeta = $this->templateDetector->detectFromStored($stored);
+        $layoutFingerprint = (string)($detectedTemplateMeta['layout_fingerprint'] ?? '');
+        $template = $this->knowledge->findTemplate($layoutFingerprint);
         $templateMs = self::elapsedMs($templateStart);
+        $matchedTemplateId = $template ? (int)$template['id'] : null;
+        $this->knowledge->saveTemplateMatchLog($jobId, $tenantId, $matchedTemplateId, $template ? 100.0 : null, $templateMs, $template ? 'matched' : 'unknown');
+        if (!$template && $layoutFingerprint !== '') {
+            $this->knowledge->saveTemplateCandidate($jobId, $tenantId, $layoutFingerprint, $detectedTemplateMeta);
+        }
 
         $openaiStart = microtime(true);
         try {
@@ -64,15 +72,17 @@ final class PrescriptionOcrService
 
             $stmt = $pdo->prepare('UPDATE prescription_parse_jobs
                 SET status = "needs_review", model_name = :model_name, raw_response_json = :raw, normalized_json = :normalized,
-                    overall_confidence = :confidence, analyzed_at = NOW(), updated_at = NOW()
+                    overall_confidence = :confidence, matched_template_id = :matched_template_id, analyzed_at = NOW(), updated_at = NOW()
                 WHERE id = :id');
             $stmt->execute([
                 ':model_name' => $ai['model'],
                 ':raw' => json_encode($ai['raw'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ':normalized' => json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ':confidence' => (float)($normalized['overall_confidence'] ?? 0),
+                ':matched_template_id' => $matchedTemplateId,
                 ':id' => $jobId,
             ]);
+            $this->correction->persistCandidates($jobId, $tenantId, $normalized);
             $this->saveMetrics($jobId, $tenantId, $companyUid, $branchUid, [
                 'preprocessing_ms' => $preprocessMs,
                 'template_detection_ms' => $templateMs,

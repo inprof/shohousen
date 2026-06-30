@@ -1,6 +1,6 @@
 <?php
 require_once dirname(__DIR__, 2) . '/private/shohousen/app/bootstrap.php';
-$user = Auth::requireLogin();
+$user = Auth::requireBranchSelected();
 View::header('処方箋読込');
 ?>
 <section class="page-title with-back">

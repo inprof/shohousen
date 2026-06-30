@@ -1,6 +1,6 @@
 <?php
 require_once dirname(__DIR__, 2) . '/private/shohousen/app/bootstrap.php';
-$user = Auth::requireLogin();
+$user = Auth::requireBranchSelected();
 $jobId = (int)($_GET['job_id'] ?? 0);
 $job = $jobId ? PrescriptionOcrService::getJob((int)$user['tenant_id'], $jobId) : null;
 if (!$job) {
@@ -81,6 +81,7 @@ View::header('解析結果確認');
         </label>
         <label>用法<input name="usage_text[]" value="<?= h((string)($med['usage_text'] ?? '')) ?>"></label>
         <label>日数<input type="number" name="days_count[]" value="<?= h((string)($med['days_count'] ?? '')) ?>"></label>
+        <label>総量/備考<input name="amount_text[]" value="<?= h((string)($med['amount_text'] ?? '')) ?>"></label>
         <label>在庫
           <select name="stock_status[]">
             <?php foreach (['adopted'=>'採用薬','in_stock'=>'在庫あり','low_stock'=>'在庫僅少','not_stocked'=>'未採用','unknown'=>'未確認'] as $key => $label): ?>
