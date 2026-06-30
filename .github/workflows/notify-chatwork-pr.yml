@@ -1,0 +1,32 @@
+name: Notify Chatwork on Pull Request
+
+on:
+  pull_request:
+    types: [opened, reopened, ready_for_review]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Send Chatwork notification
+        env:
+          CHATWORK_API_TOKEN: ${{ secrets.CHATWORK_API_TOKEN }}
+          CHATWORK_ROOM_ID: ${{ secrets.CHATWORK_ROOM_ID }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          PR_USER: ${{ github.event.pull_request.user.login }}
+          PR_BASE: ${{ github.event.pull_request.base.ref }}
+          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+        run: |
+          MESSAGE="[info][title]Pull Requestが作成されました[/title]
+          作成者: ${PR_USER}
+          タイトル: ${PR_TITLE}
+          向き: ${PR_HEAD} → ${PR_BASE}
+          URL: ${PR_URL}
+          [/info]"
+
+          curl -X POST \
+            -H "x-chatworktoken: ${CHATWORK_API_TOKEN}" \
+            --data-urlencode "body=${MESSAGE}" \
+            "https://api.chatwork.com/v2/rooms/${CHATWORK_ROOM_ID}/messages"
