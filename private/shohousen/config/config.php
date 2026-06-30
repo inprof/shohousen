@@ -1,23 +1,35 @@
 <?php
 return [
-    'db' => [
-        // 拠点DB：患者、処方箋、AI解析ジョブ、画像メタ情報を保存する。
-        'branch' => [
+    // DB接続ユーザーは2系統。
+    // 1) admin_knowledge: 管理者DB + 補助学習DBを参照できるアカウント
+    // 2) tenant: 会社DB + 拠点DBを参照できるアカウント
+    'db_accounts' => [
+        'admin_knowledge' => [
             'host' => 'localhost',
-            'database' => 'YOUR_BRANCH_DATABASE_NAME',
-            'user' => 'YOUR_BRANCH_DATABASE_USER',
-            'password' => 'YOUR_BRANCH_DATABASE_PASSWORD',
+            'user' => 'YOUR_ADMIN_KNOWLEDGE_DB_USER',
+            'password' => 'YOUR_ADMIN_KNOWLEDGE_DB_PASSWORD',
             'charset' => 'utf8mb4',
         ],
-        // 補助学習型DB：テンプレート、補正ルール、薬品辞書、出力マッピングを保存する。
-        'knowledge' => [
+        'tenant' => [
             'host' => 'localhost',
-            'database' => 'YOUR_KNOWLEDGE_DATABASE_NAME',
-            'user' => 'YOUR_KNOWLEDGE_DATABASE_USER',
-            'password' => 'YOUR_KNOWLEDGE_DATABASE_PASSWORD',
+            'user' => 'YOUR_COMPANY_BRANCH_DB_USER',
+            'password' => 'YOUR_COMPANY_BRANCH_DB_PASSWORD',
             'charset' => 'utf8mb4',
         ],
     ],
+
+    // 固定DB名と開発用デフォルトDB名。
+    // SaaS本運用では会社/拠点DB名は管理者DBの割当テーブルから取得する。
+    'db_names' => [
+        'admin' => 'YOUR_ADMIN_DATABASE_NAME',
+        'knowledge' => 'YOUR_KNOWLEDGE_DATABASE_NAME',
+        'default_company' => 'YOUR_DEFAULT_COMPANY_DATABASE_NAME',
+        'default_branch' => 'YOUR_DEFAULT_BRANCH_DATABASE_NAME',
+    ],
+
+    // 旧形式互換用。新規実装では db_accounts / db_names を優先する。
+    'db' => [],
+
     'app' => [
         'name' => 'PharmaAssist',
         'base_url' => '',
@@ -25,18 +37,18 @@ return [
         'timezone' => 'Asia/Tokyo',
         'demo_mode' => true,
         'default_db_connection' => 'branch',
-        // 会社・拠点連携が未完成の間は仮UIDで固定する。
-        'company_uid' => 'cmp_dev_0001',
-        'branch_uid' => 'br_dev_0001',
+        'default_company_uid' => 'cmp_dev_0001',
+        'default_branch_uid' => 'br_dev_0001',
     ],
+
     'openai' => [
         'api_key' => 'YOUR_OPENAI_API_KEY',
         'model' => 'gpt-4o-mini',
         'vision_detail' => 'high',
         'timeout_seconds' => 60,
     ],
+
     'storage' => [
-        // public_html と同階層の private 配下に保存する前提。
         'prescription_dir' => dirname(__DIR__) . '/storage/prescriptions',
     ],
 ];

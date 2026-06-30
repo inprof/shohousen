@@ -1,6 +1,6 @@
 <?php
 require_once dirname(__DIR__, 2) . '/private/shohousen/app/bootstrap.php';
-$user = Auth::requireLogin();
+$user = Auth::requireBranchSelected();
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     redirect('/prescription_scan.php');
 }

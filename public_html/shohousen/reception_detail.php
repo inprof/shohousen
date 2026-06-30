@@ -1,6 +1,6 @@
 <?php
 require_once dirname(__DIR__, 2) . '/private/shohousen/app/bootstrap.php';
-$user = Auth::requireLogin();
+$user = Auth::requireBranchSelected();
 $id = (int)($_GET['id'] ?? 0);
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     Csrf::verify();

@@ -1,6 +1,6 @@
 <?php
 require_once dirname(__DIR__, 2) . '/private/shohousen/app/bootstrap.php';
-$user = Auth::requireLogin();
+$user = Auth::requireBranchSelected();
 $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
 if ($id > 0) {
     $saved = get_prescription((int)$user['tenant_id'], $id);

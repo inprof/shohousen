@@ -35,8 +35,14 @@ final class PrescriptionQrService
             throw new RuntimeException('QR生成対象の処方箋が見つかりません。');
         }
         $payload = $this->buildPayload($prescription);
-        $stmt = Db::branch()->prepare('UPDATE prescriptions SET qr_payload = :payload, updated_at = NOW() WHERE tenant_id = :tenant_id AND id = :id');
-        $stmt->execute([':payload' => $payload, ':tenant_id' => $tenantId, ':id' => $prescriptionId]);
+        $where = 'id = :id';
+        $params = [':payload' => $payload, ':id' => $prescriptionId];
+        if (Db::columnExists(Db::branch(), 'prescriptions', 'tenant_id')) {
+            $where .= ' AND tenant_id = :tenant_id';
+            $params[':tenant_id'] = $tenantId;
+        }
+        $stmt = Db::branch()->prepare('UPDATE prescriptions SET qr_payload = :payload, updated_at = NOW() WHERE ' . $where);
+        $stmt->execute($params);
         return $payload;
     }
 }

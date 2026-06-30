@@ -24,11 +24,13 @@ final class PrescriptionFeedbackService
         $drugNames = $finalPost['drug_name'] ?? [];
         $usageTexts = $finalPost['usage_text'] ?? [];
         $daysCounts = $finalPost['days_count'] ?? [];
+        $amountTexts = $finalPost['amount_text'] ?? [];
         foreach ($drugNames as $i => $finalDrug) {
             $aiMed = $aiMeds[$i] ?? [];
             $this->appendIfChanged($rows, 'medications[' . $i . '].drug_name', 'drug_name', (string)($aiMed['drug_name'] ?? ''), (string)$finalDrug, $aiMed['confidence'] ?? null);
             $this->appendIfChanged($rows, 'medications[' . $i . '].usage_text', 'usage_text', (string)($aiMed['usage_text'] ?? ''), (string)($usageTexts[$i] ?? ''), $aiMed['confidence'] ?? null);
             $this->appendIfChanged($rows, 'medications[' . $i . '].days_count', 'days_count', (string)($aiMed['days_count'] ?? ''), (string)($daysCounts[$i] ?? ''), $aiMed['confidence'] ?? null);
+            $this->appendIfChanged($rows, 'medications[' . $i . '].amount_text', 'amount_text', (string)($aiMed['amount_text'] ?? ''), (string)($amountTexts[$i] ?? ''), $aiMed['confidence'] ?? null);
         }
 
         if (!$rows) {

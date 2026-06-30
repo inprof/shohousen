@@ -6,23 +6,22 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     $user = Auth::login(trim((string)($_POST['email'] ?? '')), (string)($_POST['password'] ?? ''), 'pharmacy_user');
     if ($user) {
         Auth::completeLogin($user);
-        redirect('/menu.php');
+        redirect('/branch_select.php');
     }
     $error = 'メールアドレスまたはパスワードが違います。';
 }
-View::header('ユーザーログイン', ['body_class' => 'auth-page']);
+View::header('会社ログイン', ['body_class' => 'auth-page']);
 ?>
 <section class="auth-wrap">
   <form class="card auth-card" method="post">
     <?= Csrf::field() ?>
-    <h1>ユーザーログイン</h1>
+    <h1>会社ログイン</h1>
     <?php if ($error): ?><div class="alert error"><?= h($error) ?></div><?php endif; ?>
     <label>メールアドレス<input type="email" name="email" value="demo.user@pharma.local" required></label>
     <label>パスワード<input type="password" name="password" value="demo1234" required></label>
-    <label class="check-row"><input type="checkbox" checked>ログイン状態を保持する</label>
-    <button class="btn primary wide" type="submit">ログイン</button>
-    <a class="text-link" href="<?= h(app_url('/admin_login.php')) ?>">管理者ログインはこちら</a>
-    <div class="notice"><strong>セキュリティについて</strong><br>業務利用では、必要に応じてOTP連携を追加してください。</div>
+    <button class="btn primary wide" type="submit">ログインして拠点選択へ</button>
+    <a class="text-link" href="<?= h(app_url('/admin_login.php')) ?>">会社管理者ログインはこちら</a>
+    <div class="notice"><strong>SaaS接続</strong><br>ログイン後、管理者DBの割当情報から会社DB/拠点DBを解決します。</div>
   </form>
 </section>
 <?php View::footer(); ?>

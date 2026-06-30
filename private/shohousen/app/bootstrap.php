@@ -73,6 +73,7 @@ require_once __DIR__ . '/View.php';
 require_once __DIR__ . '/Repositories.php';
 require_once __DIR__ . '/OpenAiPrescriptionClient.php';
 require_once __DIR__ . '/PrescriptionImagePreprocessor.php';
+require_once __DIR__ . '/PrescriptionTemplateDetector.php';
 require_once __DIR__ . '/PrescriptionKnowledgeService.php';
 require_once __DIR__ . '/PrescriptionCorrectionService.php';
 require_once __DIR__ . '/PrescriptionOcrService.php';
@@ -82,12 +83,26 @@ require_once __DIR__ . '/PrescriptionQrService.php';
 
 function current_company_uid(): string
 {
-    return (string)app_config('app.company_uid', 'cmp_dev_0001');
+    return (string)(
+        $_SESSION['company_uid']
+        ?? ($_SESSION['user']['company_uid'] ?? null)
+        ?? app_config('app.default_company_uid', app_config('app.company_uid', 'cmp_dev_0001'))
+    );
 }
 
 function current_branch_uid(): string
 {
-    return (string)app_config('app.branch_uid', 'br_dev_0001');
+    return (string)(
+        $_SESSION['branch_uid']
+        ?? ($_SESSION['user']['branch_uid'] ?? null)
+        ?? app_config('app.default_branch_uid', app_config('app.branch_uid', 'br_dev_0001'))
+    );
+}
+
+function current_location_id(): ?int
+{
+    $value = $_SESSION['location_id'] ?? ($_SESSION['user']['location_id'] ?? null);
+    return $value !== null ? (int)$value : null;
 }
 
 function json_encode_ja(array $value): string
