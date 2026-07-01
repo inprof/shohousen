@@ -1,0 +1,75 @@
+name: Deploy to Xserver
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-xserver-main
+  cancel-in-progress: true
+
+jobs:
+  deploy-public:
+    name: Deploy public_html
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+
+      - name: Upload public_html files
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: ${{ secrets.XSERVER_FTP_HOST }}
+          username: ${{ secrets.XSERVER_FTP_USER }}
+          password: ${{ secrets.XSERVER_FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          local-dir: ./public_html/shohousen/
+          server-dir: ${{ secrets.XSERVER_PUBLIC_DIR }}
+          state-name: .ftp-deploy-sync-state-public.json
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            **/*.zip
+            **/storage/**
+            **/uploads/**
+            **/*.log
+            **/tmp/**
+
+  deploy-private:
+    name: Deploy private app
+    runs-on: ubuntu-latest
+    needs: deploy-public
+
+    steps:
+      - name: Checkout latest main
+        uses: actions/checkout@v4
+
+      - name: Upload private files
+        uses: SamKirkland/FTP-Deploy-Action@v4.4.0
+        with:
+          server: ${{ secrets.XSERVER_FTP_HOST }}
+          username: ${{ secrets.XSERVER_FTP_USER }}
+          password: ${{ secrets.XSERVER_FTP_PASSWORD }}
+          protocol: ftps
+          port: 21
+          local-dir: ./private/shohousen/
+          server-dir: ${{ secrets.XSERVER_PRIVATE_DIR }}
+          state-name: .ftp-deploy-sync-state-private.json
+          exclude: |
+            **/.git*
+            **/.git*/**
+            **/node_modules/**
+            **/*.zip
+            **/storage/**
+            **/uploads/**
+            **/*.log
+            **/tmp/**
+            **/config/config.php
+            **/config/config - コピー*.php
+            **/config/*.local.php
+            **/.env
