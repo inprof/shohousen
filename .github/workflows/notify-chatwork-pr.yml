@@ -2,31 +2,65 @@ name: Notify Chatwork on Pull Request
 
 on:
   pull_request:
-    types: [opened, reopened, ready_for_review]
+    types:
+      - opened
+      - reopened
+      - ready_for_review
+      - review_requested
+  workflow_dispatch:
 
 jobs:
-  notify:
+  notify-pr:
+    name: Notify PR to Chatwork
     runs-on: ubuntu-latest
+    if: vars.CHATWORK_PR_NOTIFY_ENABLED != 'false'
 
     steps:
-      - name: Send Chatwork notification
+      - name: Send pull request notification
         env:
-          CHATWORK_API_TOKEN: ${{ secrets.CHATWORK_API_TOKEN }}
-          CHATWORK_ROOM_ID: ${{ secrets.CHATWORK_ROOM_ID }}
-          PR_TITLE: ${{ github.event.pull_request.title }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          PR_USER: ${{ github.event.pull_request.user.login }}
-          PR_BASE: ${{ github.event.pull_request.base.ref }}
-          PR_HEAD: ${{ github.event.pull_request.head.ref }}
+          CHATWORK_API_TOKEN: ${{ secrets.CHATWORK_PR_API_TOKEN || secrets.CHATWORK_API_TOKEN }}
+          CHATWORK_ROOM_ID: ${{ secrets.CHATWORK_PR_ROOM_ID || secrets.CHATWORK_ROOM_ID }}
+          PR_TITLE: ${{ github.event.pull_request.title || 'manual run' }}
+          PR_URL: ${{ github.event.pull_request.html_url || format('https://github.com/{0}/actions/runs/{1}', github.repository, github.run_id) }}
+          PR_USER: ${{ github.event.pull_request.user.login || github.actor }}
+          PR_BASE: ${{ github.event.pull_request.base.ref || 'main' }}
+          PR_HEAD: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          REPOSITORY: ${{ github.repository }}
+          ACTION_TYPE: ${{ github.event.action || 'manual' }}
         run: |
-          MESSAGE="[info][title]Pull Requestが作成されました[/title]
+          if [ -z "$CHATWORK_API_TOKEN" ] || [ -z "$CHATWORK_ROOM_ID" ]; then
+            echo "Chatwork PR notification secrets are not set. Skipping notification."
+            exit 0
+          fi
+
+          case "$ACTION_TYPE" in
+            opened)
+              TITLE="【GitHub】Pull Requestが作成されました"
+              ;;
+            reopened)
+              TITLE="【GitHub】Pull Requestが再オープンされました"
+              ;;
+            ready_for_review)
+              TITLE="【GitHub】Draft PRがレビュー可能になりました"
+              ;;
+            review_requested)
+              TITLE="【GitHub】Pull Requestのレビュー依頼が追加されました"
+              ;;
+            *)
+              TITLE="【GitHub】Pull Request通知"
+              ;;
+          esac
+
+          MESSAGE="[info][title]${TITLE}[/title]
+          種別: Pull Request通知
+          リポジトリ: ${REPOSITORY}
           作成者: ${PR_USER}
           タイトル: ${PR_TITLE}
           向き: ${PR_HEAD} → ${PR_BASE}
           URL: ${PR_URL}
           [/info]"
 
-          curl -X POST \
+          curl --fail-with-body -X POST \
             -H "x-chatworktoken: ${CHATWORK_API_TOKEN}" \
             --data-urlencode "body=${MESSAGE}" \
             "https://api.chatwork.com/v2/rooms/${CHATWORK_ROOM_ID}/messages"
