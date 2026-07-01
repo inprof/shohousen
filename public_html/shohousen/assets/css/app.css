@@ -504,3 +504,74 @@ input[readonly] { background: #f9fbfe; }
   .ocr-med-row, .edit-med-row { grid-template-columns: 1fr; }
   .row-no { width: 100%; }
 }
+
+/* =========================================================
+   追加: 処方箋確認・保存前後UI改善
+   使用画面: prescription_scan.php / prescription_result.php / prescription_saved.php
+   ========================================================= */
+.ocr-source-preview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: start;
+  padding: 16px;
+  margin-bottom: 18px;
+}
+.ocr-source-preview h2 { margin: 0 0 6px; font-size: 16px; }
+.ocr-source-preview p { margin: 0; color: var(--muted); line-height: 1.7; font-size: 13px; }
+.ocr-source-preview img {
+  grid-column: 1 / -1;
+  display: block;
+  width: 100%;
+  max-height: min(420px, 38vh);
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #f8fbff;
+}
+.sticky-save-actions {
+  position: sticky;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  z-index: 20;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: rgba(255, 255, 255, .96);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, .12);
+}
+.saved-confirm-card { padding: 22px; }
+.saved-status { display: flex; align-items: center; gap: 14px; margin-bottom: 18px; }
+.saved-status-icon {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 46px;
+  border-radius: 999px;
+  background: #e8f7ef;
+  color: var(--success);
+  font-size: 24px;
+  font-weight: 900;
+}
+.saved-status h2 { margin: 0 0 4px; }
+.saved-status p { margin: 3px 0; color: var(--muted); }
+.saved-summary { margin-bottom: 18px; }
+.saved-meds-table { margin-bottom: 16px; }
+.saved-qr-note { margin-bottom: 8px; }
+.scan-frame {
+  max-height: min(430px, 48vh);
+}
+.scan-frame img {
+  max-width: 100%;
+  max-height: min(430px, 48vh);
+  object-fit: contain;
+}
+
+@media (max-width: 760px) {
+  .ocr-source-preview { grid-template-columns: 1fr; }
+  .ocr-source-preview .btn { width: 100%; }
+  .ocr-source-preview img { max-height: 30vh; }
+  .sticky-save-actions { margin-left: -8px; margin-right: -8px; }
+  .sticky-save-actions .btn { width: 100%; }
+  .scan-frame { min-height: 180px; max-height: 32vh; }
+  .scan-frame img { max-height: 32vh; }
+}

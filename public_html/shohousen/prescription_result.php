@@ -22,9 +22,19 @@ $medical = $data['medical_institution'] ?? [];
 $medications = $data['medications'] ?? [];
 View::header('解析結果確認');
 ?>
-<section class="page-title"><h1>解析結果確認</h1><p>AI解析結果と補正候補を確認し、必要に応じて修正してから保存してください。</p></section>
+<section class="page-title"><h1>解析結果確認</h1><p>AI解析結果と補正候補を確認し、必要に応じて修正してから確定保存してください。QRは保存完了後に作成します。</p></section>
 <?php if (!empty($data['warnings'])): ?>
   <div class="alert info"><strong>解析メモ</strong><br><?= h(implode(' / ', array_map('strval', $data['warnings']))) ?></div>
+<?php endif; ?>
+<?php if ($jobId > 0): ?>
+  <section class="card ocr-source-preview">
+    <div>
+      <h2>撮影画像</h2>
+      <p>画像は画面内に収まる大きさで表示します。元画像が大きい場合でも、確認ボタンが隠れにくいように調整しています。</p>
+    </div>
+    <a class="btn ghost" href="<?= h(app_url('/prescription_job_image.php?job_id=' . (string)$jobId)) ?>" target="_blank" rel="noopener">画像を別画面で開く</a>
+    <img src="<?= h(app_url('/prescription_job_image.php?job_id=' . (string)$jobId)) ?>" alt="撮影した処方箋画像" loading="lazy">
+  </section>
 <?php endif; ?>
 <form class="card result-card" method="post" action="<?= h(app_url('/prescription_save.php')) ?>">
   <?= Csrf::field() ?>
@@ -92,9 +102,9 @@ View::header('解析結果確認');
       </div>
     <?php endforeach; ?>
   </div>
-  <div class="button-row end">
+  <div class="button-row end sticky-save-actions">
     <a class="btn ghost" href="<?= h(app_url('/prescription_scan.php')) ?>">再撮影</a>
-    <button class="btn primary" type="submit">確定してQR化</button>
+    <button class="btn primary" type="submit">確定してDB保存</button>
   </div>
 </form>
 <?php View::footer(); ?>

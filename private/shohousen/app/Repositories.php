@@ -159,7 +159,6 @@ function create_prescription_from_post(array $user, array $post): int
                     ->execute([':prescription_id' => $prescriptionId, ':id' => $parseJobId]);
             }
         }
-        (new PrescriptionQrService())->persistPayload($tenantId, $prescriptionId);
         audit_log($tenantId, (int)$user['id'], 'prescription.create', 'prescriptions', $prescriptionId, ['reception_no' => $receptionNo, 'parse_job_id' => $parseJobId]);
         $pdo->commit();
         return $prescriptionId;

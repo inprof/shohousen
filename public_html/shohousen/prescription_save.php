@@ -6,4 +6,4 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
 }
 Csrf::verify();
 $id = create_prescription_from_post($user, $_POST);
-redirect('/qr.php?id=' . $id);
+redirect('/prescription_saved.php?id=' . $id);
