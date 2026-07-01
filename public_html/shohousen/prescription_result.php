@@ -21,7 +21,13 @@ $prescription = $data['prescription'] ?? [];
 $medical = $data['medical_institution'] ?? [];
 $medications = $data['medications'] ?? [];
 $dynamicFields = is_array($data['form_fields'] ?? null) ? $data['form_fields'] : [];
-$fieldPreferences = (new PrescriptionKnowledgeService())->branchFieldPreferenceMap();
+$knowledgeService = new PrescriptionKnowledgeService();
+// private側の反映漏れや古いキャッシュがあっても解析結果画面をFatalで止めない。
+// branchFieldPreferenceMap() は補助学習DBから拠点ごとの初期チェック状態を取得するだけなので、
+// 未反映時は空配列として扱い、画面表示と保存処理を優先する。
+$fieldPreferences = method_exists($knowledgeService, 'branchFieldPreferenceMap')
+    ? $knowledgeService->branchFieldPreferenceMap()
+    : [];
 $fieldGroupLabels = [
     'patient' => '患者情報',
     'insurance' => '保険情報',
