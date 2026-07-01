@@ -76,8 +76,15 @@ function find_or_create_medical_institution(int $tenantId, array $input): ?int
         return null;
     }
     $code = trim((string)($input['medical_institution_code'] ?? ''));
-    $stmt = $pdo->prepare('SELECT id FROM medical_institutions WHERE (institution_code = :code AND :code <> "") OR name = :name LIMIT 1');
-    $stmt->execute([':code' => $code, ':name' => $name]);
+
+    if ($code !== '') {
+        $stmt = $pdo->prepare('SELECT id FROM medical_institutions WHERE institution_code = :code OR name = :name LIMIT 1');
+        $stmt->execute([':code' => $code, ':name' => $name]);
+    } else {
+        $stmt = $pdo->prepare('SELECT id FROM medical_institutions WHERE name = :name LIMIT 1');
+        $stmt->execute([':name' => $name]);
+    }
+
     $id = $stmt->fetchColumn();
     if ($id) {
         return (int)$id;
@@ -86,6 +93,98 @@ function find_or_create_medical_institution(int $tenantId, array $input): ?int
     $stmt->execute([':code' => $code ?: null, ':name' => $name]);
     return (int)$pdo->lastInsertId();
 }
+
+
+/**
+ * 解析結果確認画面で「出力・学習対象」に選択された動的項目をPOSTから復元する。
+ * 固定帳票ではなく、処方箋ごとに変動する項目/セルもこの配列として保存する。
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function selected_prescription_fields_from_post(array $post): array
+{
+    $keys = $post['dynamic_field_key'] ?? [];
+    $labels = $post['dynamic_field_label'] ?? [];
+    $groups = $post['dynamic_field_group'] ?? [];
+    $values = $post['dynamic_field_value'] ?? [];
+    $aiValues = $post['dynamic_field_ai_value'] ?? [];
+    $sections = $post['dynamic_field_source_section'] ?? [];
+    $confidences = $post['dynamic_field_confidence'] ?? [];
+    $selected = $post['dynamic_field_selected'] ?? [];
+    $outputCandidates = $post['dynamic_field_output_candidate'] ?? [];
+    $needsChecks = $post['dynamic_field_needs_human_check'] ?? [];
+
+    $rows = [];
+    foreach ($keys as $i => $key) {
+        $key = preg_replace('/[^a-zA-Z0-9_.-]+/', '_', trim((string)$key)) ?: ('field_' . $i);
+        $label = trim((string)($labels[$i] ?? $key));
+        $value = trim((string)($values[$i] ?? ''));
+        $aiValue = trim((string)($aiValues[$i] ?? ''));
+        $group = trim((string)($groups[$i] ?? 'other'));
+        if (!in_array($group, ['patient','insurance','public_expense','prescription','medical_institution','medication','pharmacy','note','qr','other'], true)) {
+            $group = 'other';
+        }
+
+        // 何も値がなく、かつ未選択の項目は保存しない。空欄だが選択された項目は「空欄確認済み」として保存する。
+        $isSelected = isset($selected[$i]) && (string)$selected[$i] === '1';
+        if (!$isSelected && $value === '' && $aiValue === '') {
+            continue;
+        }
+
+        $rows[] = [
+            'field_key' => mb_substr($key, 0, 120),
+            'field_label' => mb_substr($label !== '' ? $label : $key, 0, 160),
+            'field_group' => $group,
+            'field_value' => $value,
+            'source_ai_value' => $aiValue,
+            'source_section' => mb_substr((string)($sections[$i] ?? ''), 0, 160),
+            'confidence' => is_numeric($confidences[$i] ?? null) ? (float)$confidences[$i] : null,
+            'needs_human_check' => isset($needsChecks[$i]) && (string)$needsChecks[$i] === '1',
+            'is_selected' => $isSelected,
+            'include_for_output' => $isSelected && (isset($outputCandidates[$i]) ? (string)$outputCandidates[$i] === '1' : true),
+            'display_order' => $i + 1,
+        ];
+    }
+
+    return $rows;
+}
+
+/**
+ * 選択された動的項目を拠点DBへ保存する。
+ */
+function save_prescription_selected_fields(PDO $pdo, int $tenantId, int $prescriptionId, ?int $parseJobId, array $rows): void
+{
+    if (!$rows || !Db::tableExists($pdo, 'prescription_selected_fields')) {
+        return;
+    }
+
+    $stmt = $pdo->prepare('INSERT INTO prescription_selected_fields
+        (prescription_id, parse_job_id, company_uid, branch_uid, tenant_id, field_key, field_label, field_group, field_value, source_ai_value, source_section, confidence, needs_human_check, is_selected, include_for_output, display_order, created_at, updated_at)
+        VALUES
+        (:prescription_id, :parse_job_id, :company_uid, :branch_uid, :tenant_id, :field_key, :field_label, :field_group, :field_value, :source_ai_value, :source_section, :confidence, :needs_human_check, :is_selected, :include_for_output, :display_order, NOW(), NOW())');
+
+    foreach ($rows as $row) {
+        $stmt->execute([
+            ':prescription_id' => $prescriptionId,
+            ':parse_job_id' => $parseJobId,
+            ':company_uid' => current_company_uid(),
+            ':branch_uid' => current_branch_uid(),
+            ':tenant_id' => $tenantId,
+            ':field_key' => $row['field_key'],
+            ':field_label' => $row['field_label'],
+            ':field_group' => $row['field_group'],
+            ':field_value' => $row['field_value'],
+            ':source_ai_value' => $row['source_ai_value'],
+            ':source_section' => $row['source_section'],
+            ':confidence' => $row['confidence'],
+            ':needs_human_check' => !empty($row['needs_human_check']) ? 1 : 0,
+            ':is_selected' => !empty($row['is_selected']) ? 1 : 0,
+            ':include_for_output' => !empty($row['include_for_output']) ? 1 : 0,
+            ':display_order' => (int)$row['display_order'],
+        ]);
+    }
+}
+
 
 function create_prescription_from_post(array $user, array $post): int
 {
@@ -151,6 +250,13 @@ function create_prescription_from_post(array $user, array $post): int
                 ':needs_check' => $status === 'low_stock' ? 1 : 0,
             ]);
         }
+        $selectedFields = selected_prescription_fields_from_post($post);
+        save_prescription_selected_fields($pdo, $tenantId, $prescriptionId, $parseJobId, $selectedFields);
+
+        if ($selectedFields) {
+            (new PrescriptionKnowledgeService())->saveFieldObservations($parseJobId, $tenantId, $prescriptionId, $selectedFields);
+        }
+
         if ($parseJobId) {
             $job = PrescriptionOcrService::getJob($tenantId, $parseJobId);
             if ($job && is_array($job['normalized'] ?? null)) {
@@ -224,6 +330,15 @@ function get_prescription(int $tenantId, int $id): ?array
     $medStmt = Db::branch()->prepare('SELECT * FROM prescription_medications WHERE prescription_id = :id ORDER BY sort_order');
     $medStmt->execute([':id' => $id]);
     $prescription['medications'] = $medStmt->fetchAll();
+
+    if (Db::tableExists(Db::branch(), 'prescription_selected_fields')) {
+        $fieldStmt = Db::branch()->prepare('SELECT * FROM prescription_selected_fields WHERE prescription_id = :id ORDER BY display_order, id');
+        $fieldStmt->execute([':id' => $id]);
+        $prescription['selected_fields'] = $fieldStmt->fetchAll();
+    } else {
+        $prescription['selected_fields'] = [];
+    }
+
     return $prescription;
 }
 

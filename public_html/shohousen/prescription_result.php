@@ -20,6 +20,31 @@ $insurance = $data['insurance'] ?? [];
 $prescription = $data['prescription'] ?? [];
 $medical = $data['medical_institution'] ?? [];
 $medications = $data['medications'] ?? [];
+$dynamicFields = is_array($data['form_fields'] ?? null) ? $data['form_fields'] : [];
+$fieldPreferences = (new PrescriptionKnowledgeService())->branchFieldPreferenceMap();
+$fieldGroupLabels = [
+    'patient' => '患者情報',
+    'insurance' => '保険情報',
+    'public_expense' => '公費情報',
+    'prescription' => '処方箋情報',
+    'medical_institution' => '医療機関情報',
+    'medication' => '処方薬情報',
+    'pharmacy' => '薬局記入欄',
+    'note' => '備考・注意',
+    'qr' => 'QR・コード',
+    'other' => 'その他',
+];
+$fieldGroupOrder = array_keys($fieldGroupLabels);
+usort($dynamicFields, static function (array $a, array $b) use ($fieldGroupOrder): int {
+    $ga = array_search((string)($a['field_group'] ?? 'other'), $fieldGroupOrder, true);
+    $gb = array_search((string)($b['field_group'] ?? 'other'), $fieldGroupOrder, true);
+    $ga = $ga === false ? 999 : $ga;
+    $gb = $gb === false ? 999 : $gb;
+    if ($ga === $gb) {
+        return strcmp((string)($a['field_label'] ?? ''), (string)($b['field_label'] ?? ''));
+    }
+    return $ga <=> $gb;
+});
 View::header('解析結果確認');
 ?>
 <section class="page-title"><h1>解析結果確認</h1><p>AI解析結果と補正候補を確認し、必要に応じて修正してから確定保存してください。QRは保存完了後に作成します。</p></section>
@@ -102,9 +127,84 @@ View::header('解析結果確認');
       </div>
     <?php endforeach; ?>
   </div>
+  <section class="dynamic-field-card">
+    <div class="dynamic-field-head">
+      <div>
+        <h2>読み取り項目の選択</h2>
+        <p>画像内でAIが読み取った項目をすべて表示します。QRや後続出力に使う項目だけチェックを入れてください。未チェックでも確認画面上では残るため、不要項目の判断履歴として補助学習DBに反映されます。</p>
+      </div>
+      <div class="field-actions">
+        <button class="btn ghost small" type="button" data-field-check="all">全選択</button>
+        <button class="btn ghost small" type="button" data-field-check="none">全解除</button>
+      </div>
+    </div>
+
+    <?php if (!$dynamicFields): ?>
+      <div class="alert warning">AIが動的項目を返していません。固定項目だけを保存します。プロンプトまたはOpenAI応答を確認してください。</div>
+    <?php else: ?>
+      <div class="dynamic-field-grid">
+        <?php $currentGroup = null; ?>
+        <?php foreach ($dynamicFields as $i => $field): ?>
+          <?php
+            $group = (string)($field['field_group'] ?? 'other');
+            if (!isset($fieldGroupLabels[$group])) { $group = 'other'; }
+            $key = (string)($field['field_key'] ?? ('field_' . $i));
+            $label = (string)($field['field_label'] ?? $key);
+            $value = (string)($field['value'] ?? '');
+            $confidence = is_numeric($field['confidence'] ?? null) ? (float)$field['confidence'] : null;
+            $includeDefault = array_key_exists($key, $fieldPreferences) ? (bool)$fieldPreferences[$key] : (bool)($field['include_default'] ?? false);
+            if ($currentGroup !== $group):
+              $currentGroup = $group;
+          ?>
+            <h3 class="dynamic-field-group"><?= h($fieldGroupLabels[$group]) ?></h3>
+          <?php endif; ?>
+
+          <div class="dynamic-field-row <?= !empty($field['needs_human_check']) ? 'needs-check' : '' ?>">
+            <label class="field-use-check">
+              <input type="checkbox" name="dynamic_field_selected[<?= $i ?>]" value="1" <?= $includeDefault ? 'checked' : '' ?>>
+              <span>使う</span>
+            </label>
+
+            <div class="field-main">
+              <label>
+                <span class="field-label"><?= h($label) ?></span>
+                <input name="dynamic_field_value[<?= $i ?>]" value="<?= h($value) ?>" placeholder="空欄">
+              </label>
+              <div class="field-meta">
+                <span><?= h((string)($field['source_section'] ?? '')) ?></span>
+                <?php if ($confidence !== null): ?><span>信頼度 <?= h((string)round($confidence, 1)) ?>%</span><?php endif; ?>
+                <?php if (!empty($field['needs_human_check'])): ?><span class="attention">要確認</span><?php endif; ?>
+              </div>
+            </div>
+
+            <input type="hidden" name="dynamic_field_key[<?= $i ?>]" value="<?= h($key) ?>">
+            <input type="hidden" name="dynamic_field_label[<?= $i ?>]" value="<?= h($label) ?>">
+            <input type="hidden" name="dynamic_field_group[<?= $i ?>]" value="<?= h($group) ?>">
+            <input type="hidden" name="dynamic_field_ai_value[<?= $i ?>]" value="<?= h($value) ?>">
+            <input type="hidden" name="dynamic_field_source_section[<?= $i ?>]" value="<?= h((string)($field['source_section'] ?? '')) ?>">
+            <input type="hidden" name="dynamic_field_confidence[<?= $i ?>]" value="<?= h((string)($confidence ?? '')) ?>">
+            <input type="hidden" name="dynamic_field_needs_human_check[<?= $i ?>]" value="<?= !empty($field['needs_human_check']) ? '1' : '0' ?>">
+            <input type="hidden" name="dynamic_field_output_candidate[<?= $i ?>]" value="<?= !empty($field['output_candidate']) ? '1' : '0' ?>">
+          </div>
+        <?php endforeach; ?>
+      </div>
+    <?php endif; ?>
+  </section>
+
   <div class="button-row end sticky-save-actions">
     <a class="btn ghost" href="<?= h(app_url('/prescription_scan.php')) ?>">再撮影</a>
-    <button class="btn primary" type="submit">確定してDB保存</button>
+    <button class="btn primary" type="submit">選択項目を含めてDB保存</button>
   </div>
 </form>
+<script>
+document.addEventListener('click', function (event) {
+  var target = event.target;
+  if (!(target instanceof HTMLElement)) return;
+  var mode = target.getAttribute('data-field-check');
+  if (!mode) return;
+  document.querySelectorAll('.dynamic-field-row input[type="checkbox"]').forEach(function (checkbox) {
+    checkbox.checked = mode === 'all';
+  });
+});
+</script>
 <?php View::footer(); ?>

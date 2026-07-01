@@ -131,6 +131,9 @@ final class OpenAiPrescriptionClient
 あなたは日本の薬局で利用する処方箋OCR補助エンジンです。
 医療情報のため、不明点は推測で埋めず、空欄・null・needs_human_check=trueで返してください。
 患者情報、保険情報、医療機関情報、処方薬情報を抽出します。
+処方箋の様式は医療機関・拠点ごとに異なるため、固定テンプレートだけに寄せず、画像内に見える項目名と値をできる限り form_fields に列挙してください。
+form_fields には、空欄でも帳票上に存在する主要項目を入れてください。例: 公費負担者番号、公費負担医療の受給者番号、保険者番号、被保険者証の記号番号、患者氏名、フリガナ、生年月日、性別、区分、交付年月日、処方箋使用期間、医療機関所在地、医療機関名、電話番号、保険医氏名、都道府県番号、点数表番号、医療機関コード、備考、保険医署名、薬品名、用量、用法、日数、QR有無など。
+出力に使うかどうかは人間が後で選択するため、include_default は「通常出力に使いそうな項目」だけ true にし、それ以外も form_fields には残してください。
 出力は必ず指定JSON Schemaに従い、余計な文章を含めないでください。
 数字、日付、薬品名、用法、日数は特に慎重に扱ってください。
 薬品名や用法が読みにくい場合はneeds_human_check=trueにしてください。
@@ -140,10 +143,41 @@ PROMPT;
 
     public static function responseSchema(): array
     {
+        $fieldItemSchema = [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => [
+                'field_key',
+                'field_label',
+                'field_group',
+                'value',
+                'value_type',
+                'source_section',
+                'confidence',
+                'needs_human_check',
+                'include_default',
+                'output_candidate',
+                'reason'
+            ],
+            'properties' => [
+                'field_key' => ['type' => 'string', 'description' => 'snake_case。分からない場合は項目名から生成。例: patient_name, public_expense_beneficiary_number'],
+                'field_label' => ['type' => 'string', 'description' => '帳票上または人間に表示する項目名。例: 氏名、保険者番号、公費負担者番号'],
+                'field_group' => ['type' => 'string', 'enum' => ['patient', 'insurance', 'public_expense', 'prescription', 'medical_institution', 'medication', 'pharmacy', 'note', 'qr', 'other']],
+                'value' => ['type' => 'string', 'description' => '読み取った値。空欄なら空文字。'],
+                'value_type' => ['type' => 'string', 'enum' => ['text', 'date', 'number', 'code', 'person_name', 'drug', 'usage', 'amount', 'boolean', 'unknown']],
+                'source_section' => ['type' => 'string', 'description' => '帳票上のおおまかな場所。例: 上部左、上部右、処方欄、下部QR'],
+                'confidence' => ['type' => 'number'],
+                'needs_human_check' => ['type' => 'boolean'],
+                'include_default' => ['type' => 'boolean', 'description' => '通常出力・QR化の候補ならtrue。判断に迷う場合はfalse。'],
+                'output_candidate' => ['type' => 'boolean', 'description' => '出力項目として選択候補に出す場合true。原則true。'],
+                'reason' => ['type' => 'string'],
+            ],
+        ];
+
         return [
             'type' => 'object',
             'additionalProperties' => false,
-            'required' => ['patient', 'insurance', 'prescription', 'medical_institution', 'medications', 'warnings', 'overall_confidence'],
+            'required' => ['patient', 'insurance', 'prescription', 'medical_institution', 'medications', 'form_fields', 'warnings', 'overall_confidence'],
             'properties' => [
                 'patient' => [
                     'type' => 'object',
@@ -212,6 +246,11 @@ PROMPT;
                         ],
                     ],
                 ],
+                'form_fields' => [
+                    'type' => 'array',
+                    'description' => '帳票内に見える全項目の読み取り結果。固定項目に入らない項目や空欄項目も含める。',
+                    'items' => $fieldItemSchema,
+                ],
                 'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
                 'overall_confidence' => ['type' => 'number'],
             ],
@@ -220,23 +259,167 @@ PROMPT;
 
     public static function normalize(array $value): array
     {
-        $demo = self::demoNormalized();
-        return array_replace_recursive($demo, $value);
+        $normalized = array_replace_recursive(self::blankNormalized(), $value);
+        $normalized['form_fields'] = self::normalizeFormFields($normalized);
+        return $normalized;
+    }
+
+    public static function blankNormalized(): array
+    {
+        return [
+            'patient' => ['name' => '', 'kana' => '', 'birth_date' => '', 'gender' => '不明', 'confidence' => 0.0, 'needs_human_check' => true],
+            'insurance' => ['insurance_no' => '', 'insured_symbol_number' => '', 'copay_rate' => '', 'confidence' => 0.0, 'needs_human_check' => true],
+            'prescription' => ['issued_on' => '', 'expires_on' => '', 'confidence' => 0.0, 'needs_human_check' => true],
+            'medical_institution' => ['code' => '', 'name' => '', 'doctor_name' => '', 'phone' => '', 'confidence' => 0.0, 'needs_human_check' => true],
+            'medications' => [],
+            'form_fields' => [],
+            'warnings' => [],
+            'overall_confidence' => 0.0,
+        ];
     }
 
     public static function demoNormalized(): array
     {
-        return [
+        return self::normalize([
             'patient' => ['name' => '山田 花子', 'kana' => '', 'birth_date' => '1975-04-12', 'gender' => '女性', 'confidence' => 94.2, 'needs_human_check' => true],
             'insurance' => ['insurance_no' => '12345678', 'insured_symbol_number' => '987654321', 'copay_rate' => '3割', 'confidence' => 90.0, 'needs_human_check' => true],
-            'prescription' => ['issued_on' => '2024-05-20', 'expires_on' => '', 'confidence' => 92.0, 'needs_human_check' => true],
-            'medical_institution' => ['code' => '1312345', 'name' => 'さくらクリニック', 'doctor_name' => '', 'phone' => '', 'confidence' => 90.0, 'needs_human_check' => true],
+            'prescription' => ['issued_on' => '2024-05-20', 'expires_on' => '', 'confidence' => 88.0, 'needs_human_check' => true],
+            'medical_institution' => ['code' => '1312345', 'name' => 'さくらクリニック', 'doctor_name' => '', 'phone' => '', 'confidence' => 86.0, 'needs_human_check' => true],
             'medications' => [
-                ['drug_name' => 'アムロジピン0D錠5mg', 'dose_text' => '', 'usage_text' => '1日1回 朝食後', 'days_count' => 28, 'amount_text' => '28日分', 'confidence' => 78.0, 'needs_human_check' => true, 'reason' => 'デモデータ。0D/OD確認が必要。'],
-                ['drug_name' => 'ムコソルバン錠15mg', 'dose_text' => '', 'usage_text' => '1日3回 毎食後', 'days_count' => 28, 'amount_text' => '28日分', 'confidence' => 88.0, 'needs_human_check' => true, 'reason' => 'デモデータ。'],
+                ['drug_name' => 'アムロジピンOD錠5mg', 'dose_text' => '1錠', 'usage_text' => '1日1回 朝食後', 'days_count' => 28, 'amount_text' => '28日分', 'confidence' => 89.0, 'needs_human_check' => true, 'reason' => 'demo'],
+                ['drug_name' => 'ムコソルバン錠15mg', 'dose_text' => '1錠', 'usage_text' => '1日3回 毎食後', 'days_count' => 28, 'amount_text' => '28日分', 'confidence' => 87.0, 'needs_human_check' => true, 'reason' => 'demo'],
             ],
-            'warnings' => ['デモモードの解析結果です。OpenAI APIキー設定後に実解析へ切り替わります。'],
-            'overall_confidence' => 86.0,
+            'form_fields' => [
+                ['field_key' => 'patient_name', 'field_label' => '氏名', 'field_group' => 'patient', 'value' => '山田 花子', 'value_type' => 'person_name', 'source_section' => '患者欄', 'confidence' => 94.2, 'needs_human_check' => true, 'include_default' => true, 'output_candidate' => true, 'reason' => 'demo'],
+                ['field_key' => 'insurance_no', 'field_label' => '保険者番号', 'field_group' => 'insurance', 'value' => '12345678', 'value_type' => 'code', 'source_section' => '保険欄', 'confidence' => 90.0, 'needs_human_check' => true, 'include_default' => true, 'output_candidate' => true, 'reason' => 'demo'],
+                ['field_key' => 'medical_institution_name', 'field_label' => '保険医療機関の名称', 'field_group' => 'medical_institution', 'value' => 'さくらクリニック', 'value_type' => 'text', 'source_section' => '医療機関欄', 'confidence' => 86.0, 'needs_human_check' => true, 'include_default' => true, 'output_candidate' => true, 'reason' => 'demo'],
+            ],
+            'warnings' => ['demo data'],
+            'overall_confidence' => 91.2,
+        ]);
+    }
+
+    /** @return array<int,array<string,mixed>> */
+    private static function normalizeFormFields(array $normalized): array
+    {
+        $fields = [];
+        foreach (($normalized['form_fields'] ?? []) as $field) {
+            if (!is_array($field)) {
+                continue;
+            }
+            $fields[] = self::normalizeFormField($field);
+        }
+
+        $auto = [
+            ['patient_name', '氏名', 'patient', (string)($normalized['patient']['name'] ?? ''), 'person_name', '患者欄', $normalized['patient']['confidence'] ?? 0, true],
+            ['patient_kana', 'フリガナ', 'patient', (string)($normalized['patient']['kana'] ?? ''), 'text', '患者欄', $normalized['patient']['confidence'] ?? 0, false],
+            ['patient_birth_date', '生年月日', 'patient', (string)($normalized['patient']['birth_date'] ?? ''), 'date', '患者欄', $normalized['patient']['confidence'] ?? 0, true],
+            ['patient_gender', '性別', 'patient', (string)($normalized['patient']['gender'] ?? ''), 'text', '患者欄', $normalized['patient']['confidence'] ?? 0, true],
+            ['insurance_no', '保険者番号', 'insurance', (string)($normalized['insurance']['insurance_no'] ?? ''), 'code', '保険欄', $normalized['insurance']['confidence'] ?? 0, true],
+            ['insured_symbol_number', '被保険者証・被保険者手帳の記号・番号', 'insurance', (string)($normalized['insurance']['insured_symbol_number'] ?? ''), 'code', '保険欄', $normalized['insurance']['confidence'] ?? 0, true],
+            ['copay_rate', '負担割合', 'insurance', (string)($normalized['insurance']['copay_rate'] ?? ''), 'text', '保険欄', $normalized['insurance']['confidence'] ?? 0, false],
+            ['issued_on', '交付年月日', 'prescription', (string)($normalized['prescription']['issued_on'] ?? ''), 'date', '処方箋欄', $normalized['prescription']['confidence'] ?? 0, true],
+            ['expires_on', '処方箋の使用期間', 'prescription', (string)($normalized['prescription']['expires_on'] ?? ''), 'date', '処方箋欄', $normalized['prescription']['confidence'] ?? 0, false],
+            ['medical_institution_code', '医療機関コード', 'medical_institution', (string)($normalized['medical_institution']['code'] ?? ''), 'code', '医療機関欄', $normalized['medical_institution']['confidence'] ?? 0, true],
+            ['medical_institution_name', '保険医療機関の名称', 'medical_institution', (string)($normalized['medical_institution']['name'] ?? ''), 'text', '医療機関欄', $normalized['medical_institution']['confidence'] ?? 0, true],
+            ['doctor_name', '保険医氏名', 'medical_institution', (string)($normalized['medical_institution']['doctor_name'] ?? ''), 'person_name', '医療機関欄', $normalized['medical_institution']['confidence'] ?? 0, false],
+            ['medical_institution_phone', '電話番号', 'medical_institution', (string)($normalized['medical_institution']['phone'] ?? ''), 'text', '医療機関欄', $normalized['medical_institution']['confidence'] ?? 0, false],
+        ];
+        foreach ($auto as [$key, $label, $group, $value, $type, $section, $confidence, $include]) {
+            $fields[] = self::normalizeFormField([
+                'field_key' => $key,
+                'field_label' => $label,
+                'field_group' => $group,
+                'value' => $value,
+                'value_type' => $type,
+                'source_section' => $section,
+                'confidence' => $confidence,
+                'needs_human_check' => true,
+                'include_default' => $include && trim($value) !== '',
+                'output_candidate' => true,
+                'reason' => 'structured_field',
+            ]);
+        }
+
+        foreach (($normalized['medications'] ?? []) as $i => $med) {
+            if (!is_array($med)) {
+                continue;
+            }
+            $n = $i + 1;
+            $conf = $med['confidence'] ?? 0;
+            $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_drug_name', 'field_label' => '処方' . $n . ' 薬品名', 'field_group' => 'medication', 'value' => (string)($med['drug_name'] ?? ''), 'value_type' => 'drug', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => trim((string)($med['drug_name'] ?? '')) !== '', 'output_candidate' => true, 'reason' => 'structured_medication']);
+            $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_dose', 'field_label' => '処方' . $n . ' 用量', 'field_group' => 'medication', 'value' => (string)($med['dose_text'] ?? ''), 'value_type' => 'amount', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => trim((string)($med['dose_text'] ?? '')) !== '', 'output_candidate' => true, 'reason' => 'structured_medication']);
+            $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_usage', 'field_label' => '処方' . $n . ' 用法', 'field_group' => 'medication', 'value' => (string)($med['usage_text'] ?? ''), 'value_type' => 'usage', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => trim((string)($med['usage_text'] ?? '')) !== '', 'output_candidate' => true, 'reason' => 'structured_medication']);
+            $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_days', 'field_label' => '処方' . $n . ' 日数', 'field_group' => 'medication', 'value' => (string)($med['days_count'] ?? ''), 'value_type' => 'number', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => ($med['days_count'] ?? '') !== '', 'output_candidate' => true, 'reason' => 'structured_medication']);
+        }
+
+        $seen = [];
+        $out = [];
+        foreach ($fields as $field) {
+            $key = (string)$field['field_key'];
+            $value = trim((string)$field['value']);
+            $dedupeKey = $key . "\n" . $value . "\n" . (string)$field['field_label'];
+            if (isset($seen[$dedupeKey])) {
+                continue;
+            }
+            $seen[$dedupeKey] = true;
+            $out[] = $field;
+        }
+
+        usort($out, static function (array $a, array $b): int {
+            $groupOrder = ['patient' => 10, 'insurance' => 20, 'public_expense' => 30, 'prescription' => 40, 'medical_institution' => 50, 'medication' => 60, 'pharmacy' => 70, 'note' => 80, 'qr' => 90, 'other' => 99];
+            return ($groupOrder[$a['field_group']] ?? 99) <=> ($groupOrder[$b['field_group']] ?? 99);
+        });
+
+        return $out;
+    }
+
+    /** @param array<string,mixed> $field */
+    private static function normalizeFormField(array $field): array
+    {
+        $group = (string)($field['field_group'] ?? 'other');
+        if (!in_array($group, ['patient', 'insurance', 'public_expense', 'prescription', 'medical_institution', 'medication', 'pharmacy', 'note', 'qr', 'other'], true)) {
+            $group = 'other';
+        }
+        $valueType = (string)($field['value_type'] ?? 'unknown');
+        if (!in_array($valueType, ['text', 'date', 'number', 'code', 'person_name', 'drug', 'usage', 'amount', 'boolean', 'unknown'], true)) {
+            $valueType = 'unknown';
+        }
+        $key = trim((string)($field['field_key'] ?? ''));
+        $label = trim((string)($field['field_label'] ?? ''));
+        if ($key === '') {
+            $key = self::makeFieldKey($label !== '' ? $label : 'field');
+        }
+        if ($label === '') {
+            $label = $key;
+        }
+        return [
+            'field_key' => self::makeFieldKey($key),
+            'field_label' => mb_substr($label, 0, 160),
+            'field_group' => $group,
+            'value' => (string)($field['value'] ?? ''),
+            'value_type' => $valueType,
+            'source_section' => mb_substr((string)($field['source_section'] ?? ''), 0, 160),
+            'confidence' => is_numeric($field['confidence'] ?? null) ? (float)$field['confidence'] : 0.0,
+            'needs_human_check' => (bool)($field['needs_human_check'] ?? true),
+            'include_default' => (bool)($field['include_default'] ?? false),
+            'output_candidate' => (bool)($field['output_candidate'] ?? true),
+            'reason' => mb_substr((string)($field['reason'] ?? ''), 0, 255),
         ];
     }
+
+    private static function makeFieldKey(string $value): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return 'field_' . substr(hash('sha1', uniqid('', true)), 0, 8);
+        }
+        $ascii = strtolower(preg_replace('/[^a-zA-Z0-9]+/', '_', $value) ?? '');
+        $ascii = trim($ascii, '_');
+        if ($ascii !== '') {
+            return mb_substr($ascii, 0, 120);
+        }
+        return 'field_' . substr(hash('sha1', $value), 0, 12);
+    }
+
 }

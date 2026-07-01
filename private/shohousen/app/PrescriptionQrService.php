@@ -25,6 +25,19 @@ final class PrescriptionQrService
             $lines[] = 'MED' . $n . '_DAYS=' . (string)$med['days_count'];
             $lines[] = 'MED' . $n . '_AMOUNT=' . (string)$med['amount_text'];
         }
+
+        foreach (($prescription['selected_fields'] ?? []) as $field) {
+            if (empty($field['include_for_output'])) {
+                continue;
+            }
+            $key = strtoupper(preg_replace('/[^A-Za-z0-9_]+/', '_', (string)$field['field_key']));
+            $key = trim($key, '_');
+            if ($key === '') {
+                continue;
+            }
+            $lines[] = 'FIELD_' . $key . '=' . str_replace(["\r", "\n"], ' ', (string)($field['field_value'] ?? ''));
+        }
+
         return implode("\n", $lines);
     }
 

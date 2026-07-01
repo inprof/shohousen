@@ -163,4 +163,115 @@ final class PrescriptionKnowledgeService
         } catch (Throwable) {
         }
     }
+
+    /**
+     * 人間が「必要/不要」を選んだ動的項目を補助学習DBへ蓄積する。
+     * 患者個人値は集計しすぎると個人情報リスクがあるため、値そのものは選択された項目だけ保存する。
+     * 後続では branch_field_preferences を使って、拠点ごとの初期チェック状態を育てる。
+     *
+     * @param array<int,array<string,mixed>> $rows
+     */
+    public function saveFieldObservations(?int $parseJobId, int $tenantId, int $prescriptionId, array $rows): void
+    {
+        if (!$rows) {
+            return;
+        }
+
+        try {
+            if (Db::tableExists(Db::knowledge(), 'prescription_field_observations')) {
+                $stmt = Db::knowledge()->prepare('INSERT INTO prescription_field_observations
+                    (company_uid, branch_uid, tenant_id, parse_job_id, prescription_id, field_key, field_label, field_group, field_value, source_ai_value, source_section, confidence, needs_human_check, is_selected, include_for_output, display_order, created_at)
+                    VALUES
+                    (:company_uid, :branch_uid, :tenant_id, :parse_job_id, :prescription_id, :field_key, :field_label, :field_group, :field_value, :source_ai_value, :source_section, :confidence, :needs_human_check, :is_selected, :include_for_output, :display_order, NOW())');
+
+                foreach ($rows as $row) {
+                    $stmt->execute([
+                        ':company_uid' => current_company_uid(),
+                        ':branch_uid' => current_branch_uid(),
+                        ':tenant_id' => $tenantId,
+                        ':parse_job_id' => $parseJobId,
+                        ':prescription_id' => $prescriptionId,
+                        ':field_key' => $row['field_key'],
+                        ':field_label' => $row['field_label'],
+                        ':field_group' => $row['field_group'],
+                        ':field_value' => $row['field_value'],
+                        ':source_ai_value' => $row['source_ai_value'],
+                        ':source_section' => $row['source_section'],
+                        ':confidence' => $row['confidence'],
+                        ':needs_human_check' => !empty($row['needs_human_check']) ? 1 : 0,
+                        ':is_selected' => !empty($row['is_selected']) ? 1 : 0,
+                        ':include_for_output' => !empty($row['include_for_output']) ? 1 : 0,
+                        ':display_order' => (int)$row['display_order'],
+                    ]);
+                }
+            }
+
+            if (Db::tableExists(Db::knowledge(), 'prescription_branch_field_preferences')) {
+                $pref = Db::knowledge()->prepare('INSERT INTO prescription_branch_field_preferences
+                    (company_uid, branch_uid, field_key, field_label, field_group, include_default, selected_count, unselected_count, last_value_sample, last_seen_at, created_at, updated_at)
+                    VALUES
+                    (:company_uid, :branch_uid, :field_key, :field_label, :field_group, :include_default, :selected_count, :unselected_count, :last_value_sample, NOW(), NOW(), NOW())
+                    ON DUPLICATE KEY UPDATE
+                        field_label = VALUES(field_label),
+                        field_group = VALUES(field_group),
+                        selected_count = selected_count + VALUES(selected_count),
+                        unselected_count = unselected_count + VALUES(unselected_count),
+                        include_default = CASE
+                            WHEN (selected_count + VALUES(selected_count)) >= GREATEST(3, (unselected_count + VALUES(unselected_count)) * 2) THEN 1
+                            WHEN (unselected_count + VALUES(unselected_count)) >= GREATEST(3, (selected_count + VALUES(selected_count)) * 2) THEN 0
+                            ELSE include_default
+                        END,
+                        last_value_sample = VALUES(last_value_sample),
+                        last_seen_at = NOW(),
+                        updated_at = NOW()');
+
+                foreach ($rows as $row) {
+                    $selected = !empty($row['is_selected']);
+                    $pref->execute([
+                        ':company_uid' => current_company_uid(),
+                        ':branch_uid' => current_branch_uid(),
+                        ':field_key' => $row['field_key'],
+                        ':field_label' => $row['field_label'],
+                        ':field_group' => $row['field_group'],
+                        ':include_default' => $selected ? 1 : 0,
+                        ':selected_count' => $selected ? 1 : 0,
+                        ':unselected_count' => $selected ? 0 : 1,
+                        ':last_value_sample' => mb_substr((string)($row['field_value'] ?? ''), 0, 255),
+                    ]);
+                }
+            }
+        } catch (Throwable) {
+            // 補助学習DBへの保存失敗で処方箋確定保存を止めない。
+        }
+    }
+
+    /**
+     * 拠点で過去に選ばれた項目の初期チェック設定を取得する。
+     *
+     * @return array<string,bool>
+     */
+    public function branchFieldPreferenceMap(): array
+    {
+        try {
+            if (!Db::tableExists(Db::knowledge(), 'prescription_branch_field_preferences')) {
+                return [];
+            }
+            $stmt = Db::knowledge()->prepare('SELECT field_key, include_default
+                FROM prescription_branch_field_preferences
+                WHERE company_uid = :company_uid AND branch_uid = :branch_uid');
+            $stmt->execute([
+                ':company_uid' => current_company_uid(),
+                ':branch_uid' => current_branch_uid(),
+            ]);
+            $map = [];
+            foreach ($stmt->fetchAll() as $row) {
+                $map[(string)$row['field_key']] = (bool)$row['include_default'];
+            }
+            return $map;
+        } catch (Throwable) {
+            return [];
+        }
+    }
+
+
 }

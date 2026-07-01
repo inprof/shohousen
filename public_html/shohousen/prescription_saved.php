@@ -45,8 +45,28 @@ View::header('確定保存完了');
     </table>
   </div>
 
+  <?php if (!empty($prescription['selected_fields'])): ?>
+    <h2>保存された読み取り項目</h2>
+    <div class="table-card saved-fields-table">
+      <table class="data-table compact">
+        <thead><tr><th>使用</th><th>項目</th><th>値</th><th>区分</th><th>信頼度</th></tr></thead>
+        <tbody>
+        <?php foreach (($prescription['selected_fields'] ?? []) as $field): ?>
+          <tr class="<?= !empty($field['include_for_output']) ? '' : 'muted-row' ?>">
+            <td><?= !empty($field['include_for_output']) ? '使用' : '未使用' ?></td>
+            <td><?= h((string)$field['field_label']) ?></td>
+            <td><?= h((string)($field['field_value'] ?? '')) ?></td>
+            <td><?= h((string)$field['field_group']) ?></td>
+            <td><?= h((string)($field['confidence'] ?? '')) ?></td>
+          </tr>
+        <?php endforeach; ?>
+        </tbody>
+      </table>
+    </div>
+  <?php endif; ?>
+
   <div class="alert info saved-qr-note">
-    QRはまだ作成していません。下の「QR作成へ進む」を押すと、保存済みDBデータからQR用中間データを生成します。
+    QRはまだ作成していません。下の「QR作成へ進む」を押すと、保存済みDBデータと「使用」にした読み取り項目からQR用中間データを生成します。
   </div>
 
   <div class="button-row end sticky-save-actions">
