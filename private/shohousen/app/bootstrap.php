@@ -86,7 +86,7 @@ function current_company_uid(): string
     return (string)(
         $_SESSION['company_uid']
         ?? ($_SESSION['user']['company_uid'] ?? null)
-        ?? app_config('app.default_company_uid', app_config('app.company_uid', 'cmp_dev_0001'))
+        ?? app_config('app.fallback_company_uid', app_config('app.default_company_uid', app_config('app.company_uid', 'cmp_0001')))
     );
 }
 
@@ -95,7 +95,7 @@ function current_branch_uid(): string
     return (string)(
         $_SESSION['branch_uid']
         ?? ($_SESSION['user']['branch_uid'] ?? null)
-        ?? app_config('app.default_branch_uid', app_config('app.branch_uid', 'br_dev_0001'))
+        ?? app_config('app.fallback_branch_uid', app_config('app.default_branch_uid', app_config('app.branch_uid', 'br_0001')))
     );
 }
 

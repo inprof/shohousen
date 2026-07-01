@@ -42,14 +42,52 @@ final class Db
 
     public static function companyForUid(string $companyUid): PDO
     {
-        $assignment = self::findCompanyAssignment($companyUid);
-        return self::company($assignment['company_db_name'] ?? self::dbName('default_company'));
+        return self::company(self::companyDbNameForUid($companyUid));
     }
 
     public static function branchForUid(string $branchUid): PDO
     {
+        return self::branch(self::branchDbNameForUid($branchUid));
+    }
+
+    public static function companyUidFromTenantId(int $tenantId): string
+    {
+        return 'cmp_' . self::formatSuffix($tenantId);
+    }
+
+    public static function branchUidFromLocationId(int $locationId): string
+    {
+        return 'br_' . self::formatSuffix($locationId);
+    }
+
+    public static function companyDbNameForUid(string $companyUid): string
+    {
+        $assignment = self::findCompanyAssignment($companyUid);
+        if (!empty($assignment['company_db_name'])) {
+            return (string)$assignment['company_db_name'];
+        }
+
+        $suffix = self::suffixFromUid($companyUid);
+        if ($suffix !== null) {
+            return self::buildDbName('company', $suffix);
+        }
+
+        return self::dbName('default_company');
+    }
+
+    public static function branchDbNameForUid(string $branchUid): string
+    {
         $assignment = self::findBranchAssignment($branchUid);
-        return self::branch($assignment['branch_db_name'] ?? self::dbName('default_branch'));
+        if (!empty($assignment['branch_db_name'])) {
+            return (string)$assignment['branch_db_name'];
+        }
+
+        $suffix = self::suffixFromUid($branchUid);
+        if ($suffix !== null) {
+            return self::buildDbName('branch', $suffix);
+        }
+
+        return self::dbName('default_branch');
     }
 
     /** @return array<string,mixed>|null */
@@ -58,17 +96,36 @@ final class Db
         if ($companyUid === '') {
             return null;
         }
+
+        $admin = self::admin();
         try {
-            if (self::tableExists(self::admin(), 'admin_company_db_assignments')) {
-                $stmt = self::admin()->prepare('SELECT * FROM admin_company_db_assignments WHERE company_uid = :company_uid AND status = "active" LIMIT 1');
+            if (self::tableExists($admin, 'admin_company_db_assignments')) {
+                $stmt = $admin->prepare('SELECT *
+                    FROM admin_company_db_assignments
+                    WHERE company_uid = :company_uid
+                       OR company_code = :company_uid
+                    ORDER BY status = "active" DESC, id ASC
+                    LIMIT 1');
                 $stmt->execute([':company_uid' => $companyUid]);
                 $row = $stmt->fetch();
-                if ($row) {
+                if ($row && (string)($row['status'] ?? 'active') === 'active') {
                     return $row;
                 }
             }
         } catch (Throwable) {
         }
+
+        // 既存管理者DB互換: tenants.id から company DB名を末尾4桁で推定する。
+        $suffix = self::suffixFromUid($companyUid);
+        if ($suffix !== null) {
+            return [
+                'company_uid' => $companyUid,
+                'company_db_suffix' => $suffix,
+                'company_db_name' => self::buildDbName('company', $suffix),
+                'status' => 'active',
+            ];
+        }
+
         return null;
     }
 
@@ -78,42 +135,69 @@ final class Db
         if ($branchUid === '') {
             return null;
         }
+
         $admin = self::admin();
+        $suffix = self::suffixFromUid($branchUid);
+        $locationId = $suffix !== null ? (int)$suffix : null;
 
         try {
             if (self::tableExists($admin, 'admin_branch_db_assignments')) {
-                $stmt = $admin->prepare('SELECT * FROM admin_branch_db_assignments WHERE branch_uid = :branch_uid AND status = "active" LIMIT 1');
-                $stmt->execute([':branch_uid' => $branchUid]);
+                $sql = 'SELECT *
+                    FROM admin_branch_db_assignments
+                    WHERE branch_uid = :branch_uid';
+                $params = [':branch_uid' => $branchUid];
+                if ($locationId !== null && $locationId > 0 && self::columnExists($admin, 'admin_branch_db_assignments', 'location_id')) {
+                    $sql .= ' OR location_id = :location_id';
+                    $params[':location_id'] = $locationId;
+                }
+                $sql .= ' ORDER BY status = "active" DESC, id ASC LIMIT 1';
+                $stmt = $admin->prepare($sql);
+                $stmt->execute($params);
                 $row = $stmt->fetch();
-                if ($row) {
+                if ($row && (string)($row['status'] ?? 'active') === 'active') {
                     return $row;
                 }
             }
         } catch (Throwable) {
         }
 
-        // 既存の管理者DBスキーマ互換: locations.location_code -> tenant_db_connections -> tenant_db_pool.db_name
+        // 既存の管理者DBスキーマ互換: locations -> tenant_db_connections -> tenant_db_pool.db_name
         try {
-            if (self::tableExists($admin, 'locations') && self::tableExists($admin, 'tenant_db_connections') && self::tableExists($admin, 'tenant_db_pool')) {
+            if ($locationId !== null
+                && self::tableExists($admin, 'locations')
+                && self::tableExists($admin, 'tenant_db_connections')
+                && self::tableExists($admin, 'tenant_db_pool')) {
                 $stmt = $admin->prepare('SELECT
-                        t.tenant_code AS company_uid,
-                        l.location_code AS branch_uid,
+                        CONCAT("cmp_", LPAD(t.id, 4, "0")) AS company_uid,
+                        CONCAT("br_", LPAD(l.id, 4, "0")) AS branch_uid,
+                        l.location_code AS branch_code,
                         l.name AS branch_name,
-                        p.db_name AS branch_db_name,
+                        COALESCE(p.db_name, CONCAT(:branch_prefix, LPAD(l.id, 4, "0"))) AS branch_db_name,
+                        RIGHT(COALESCE(p.db_name, CONCAT(:branch_prefix2, LPAD(l.id, 4, "0"))), 4) AS branch_db_suffix,
                         c.connection_key
                     FROM locations l
                     INNER JOIN tenants t ON t.id = l.tenant_id
-                    INNER JOIN tenant_db_connections c ON c.location_id = l.id
+                    LEFT JOIN tenant_db_connections c ON c.location_id = l.id AND c.status = "active"
                     LEFT JOIN tenant_db_pool p ON p.connection_key = c.connection_key
-                    WHERE l.location_code = :branch_uid AND c.status = "active"
+                    WHERE l.id = :location_id
                     LIMIT 1');
-                $stmt->execute([':branch_uid' => $branchUid]);
+                $prefix = self::patternValue('branch_prefix', 'inprof3_tenants');
+                $stmt->execute([':location_id' => $locationId, ':branch_prefix' => $prefix, ':branch_prefix2' => $prefix]);
                 $row = $stmt->fetch();
                 if ($row && !empty($row['branch_db_name'])) {
                     return $row;
                 }
             }
         } catch (Throwable) {
+        }
+
+        if ($suffix !== null) {
+            return [
+                'branch_uid' => $branchUid,
+                'branch_db_suffix' => $suffix,
+                'branch_db_name' => self::buildDbName('branch', $suffix),
+                'status' => 'active',
+            ];
         }
 
         return null;
@@ -158,14 +242,13 @@ final class Db
         }
 
         $account = self::accountConfig($accountKey);
-        $config = [
+        self::$connections[$cacheKey] = self::makePdo([
             'host' => $account['host'],
             'database' => $dbName,
             'user' => $account['user'],
             'password' => $account['password'],
             'charset' => $account['charset'] ?? 'utf8mb4',
-        ];
-        self::$connections[$cacheKey] = self::makePdo($config);
+        ]);
         return self::$connections[$cacheKey];
     }
 
@@ -201,7 +284,6 @@ final class Db
             return self::normalizeAccount($accounts[$accountKey]);
         }
 
-        // 旧config互換: db.admin / db.knowledge / db.branch などからアカウント部分だけ流用する。
         $legacy = $GLOBALS['config']['db'] ?? [];
         $fallbackKey = $accountKey === 'admin_knowledge' ? 'admin' : 'branch';
         if (isset($legacy[$fallbackKey]) && is_array($legacy[$fallbackKey])) {
@@ -235,7 +317,6 @@ final class Db
             return (string)$names[$key];
         }
 
-        // 旧config互換
         $legacy = $GLOBALS['config']['db'] ?? [];
         $legacyKey = match ($key) {
             'default_company' => 'company',
@@ -247,6 +328,36 @@ final class Db
         }
 
         return '';
+    }
+
+    private static function buildDbName(string $type, string|int $suffix): string
+    {
+        $suffix = self::formatSuffix((int)$suffix);
+        $prefix = $type === 'company'
+            ? self::patternValue('company_prefix', 'inprof3_company')
+            : self::patternValue('branch_prefix', 'inprof3_tenants');
+        return $prefix . $suffix;
+    }
+
+    private static function suffixFromUid(string $uid): ?string
+    {
+        if (preg_match('/(\d{1,})$/', $uid, $m) === 1) {
+            return self::formatSuffix((int)$m[1]);
+        }
+        return null;
+    }
+
+    private static function formatSuffix(int $number): string
+    {
+        $digits = (int)self::patternValue('suffix_digits', '4');
+        $digits = $digits > 0 ? $digits : 4;
+        return str_pad((string)$number, $digits, '0', STR_PAD_LEFT);
+    }
+
+    private static function patternValue(string $key, string $default): string
+    {
+        $patterns = $GLOBALS['config']['db_name_patterns'] ?? [];
+        return isset($patterns[$key]) && (string)$patterns[$key] !== '' ? (string)$patterns[$key] : $default;
     }
 
     private static function legacyConnectionConfig(string $name): array

@@ -6,19 +6,22 @@ final class Auth
     /**
      * 会社ログイン。
      * 認証情報は管理者DBの users / tenants を基準にする。
-     * 会社DB/拠点DBの実接続先はログイン後に割当テーブルから解決する。
+     * company_uid は tenants.id から cmp_0001 形式で生成し、会社DB名は末尾4桁から動的解決する。
      */
     public static function login(string $email, string $password, ?string $role = null): ?array
     {
         $sql = 'SELECT
                     u.*,
-                    t.tenant_code AS company_uid,
+                    t.id AS login_tenant_id,
+                    t.tenant_code AS company_code,
                     t.name AS company_name,
                     t.status AS company_status,
                     t.plan_name
                 FROM users u
                 INNER JOIN tenants t ON t.id = u.tenant_id
-                WHERE u.email = :email AND u.status = "active" AND t.status <> "deleted"
+                WHERE u.email = :email
+                  AND u.status = "active"
+                  AND t.status IN ("trial", "active", "suspended", "cancelled")
                 LIMIT 1';
         $stmt = Db::admin()->prepare($sql);
         $stmt->execute([':email' => $email]);
@@ -32,6 +35,7 @@ final class Auth
             return null;
         }
         $user['role'] = $normalizedRole;
+        $user['company_uid'] = Db::companyUidFromTenantId((int)$user['tenant_id']);
         return $user;
     }
 
@@ -39,14 +43,15 @@ final class Auth
     {
         session_regenerate_id(true);
 
-        $companyUid = (string)($user['company_uid'] ?? ('tenant_' . (string)$user['tenant_id']));
-        $companyAssignment = Db::findCompanyAssignment($companyUid);
-        $companyDbName = (string)($companyAssignment['company_db_name'] ?? app_config('db_names.default_company', ''));
+        $tenantId = (int)$user['tenant_id'];
+        $companyUid = (string)($user['company_uid'] ?? Db::companyUidFromTenantId($tenantId));
+        $companyDbName = Db::companyDbNameForUid($companyUid);
 
         $_SESSION['user'] = [
             'id' => (int)$user['id'],
-            'tenant_id' => (int)$user['tenant_id'],
+            'tenant_id' => $tenantId,
             'company_uid' => $companyUid,
+            'company_code' => (string)($user['company_code'] ?? ''),
             'company_db_name' => $companyDbName,
             'role' => self::normalizeRole((string)$user['role']),
             'name' => (string)$user['name'],
@@ -56,6 +61,8 @@ final class Auth
         ];
         $_SESSION['company_uid'] = $companyUid;
         $_SESSION['company_db_name'] = $companyDbName;
+
+        unset($_SESSION['branch_uid'], $_SESSION['branch_db_name'], $_SESSION['branch_name'], $_SESSION['branch_role'], $_SESSION['location_id']);
 
         $stmt = Db::admin()->prepare('UPDATE users SET last_login_at = NOW() WHERE id = :id');
         $stmt->execute([':id' => $user['id']]);
@@ -129,41 +136,61 @@ final class Auth
     /** @return array<int,array<string,mixed>> */
     public static function availableBranches(array $user): array
     {
-        $hasAssignmentTable = Db::tableExists(Db::admin(), 'admin_branch_db_assignments');
+        $tenantId = (int)$user['tenant_id'];
+        $admin = Db::admin();
+        $companyUidSql = 'CONCAT("cmp_", LPAD(t.id, 4, "0"))';
+        $branchUidSql = 'CONCAT("br_", LPAD(l.id, 4, "0"))';
+
+        $hasAssignmentTable = Db::tableExists($admin, 'admin_branch_db_assignments');
         $assignmentJoin = $hasAssignmentTable
-            ? 'LEFT JOIN admin_branch_db_assignments ab ON ab.branch_uid = l.location_code AND ab.status = "active"'
+            ? 'LEFT JOIN admin_branch_db_assignments ab ON (ab.location_id = l.id OR ab.branch_uid = ' . $branchUidSql . ') AND ab.status = "active"'
             : '';
         $dbSelect = $hasAssignmentTable
-            ? 'COALESCE(ab.branch_db_name, p.db_name) AS branch_db_name'
-            : 'p.db_name AS branch_db_name';
+            ? 'COALESCE(ab.branch_db_name, p.db_name, CONCAT(:branch_prefix, LPAD(l.id, 4, "0"))) AS branch_db_name,
+               COALESCE(ab.branch_db_suffix, RIGHT(COALESCE(p.db_name, CONCAT(:branch_prefix2, LPAD(l.id, 4, "0"))), 4)) AS branch_db_suffix'
+            : 'COALESCE(p.db_name, CONCAT(:branch_prefix, LPAD(l.id, 4, "0"))) AS branch_db_name,
+               RIGHT(COALESCE(p.db_name, CONCAT(:branch_prefix2, LPAD(l.id, 4, "0"))), 4) AS branch_db_suffix';
 
-        $sql = 'SELECT
+        $baseSelect = 'SELECT
                     l.id AS location_id,
-                    l.location_code AS branch_uid,
+                    ' . $companyUidSql . ' AS company_uid,
+                    ' . $branchUidSql . ' AS branch_uid,
+                    l.location_code AS branch_code,
                     l.name AS branch_name,
                     l.status AS branch_status,
-                    ul.role_at_location,
-                    ul.is_default,
+                    COALESCE(ul.role_at_location, "manager") AS role_at_location,
+                    COALESCE(ul.is_default, 0) AS is_default,
                     c.connection_key,
                     ' . $dbSelect . '
-                FROM user_locations ul
-                INNER JOIN locations l ON l.id = ul.location_id
+                FROM locations l
+                INNER JOIN tenants t ON t.id = l.tenant_id
+                LEFT JOIN user_locations ul ON ul.location_id = l.id AND ul.user_id = :user_id AND ul.status = "active"
                 LEFT JOIN tenant_db_connections c ON c.location_id = l.id AND c.status = "active"
                 LEFT JOIN tenant_db_pool p ON p.connection_key = c.connection_key
                 ' . $assignmentJoin . '
-                WHERE ul.user_id = :user_id
-                  AND ul.status = "active"
-                  AND l.status = "active"
-                ORDER BY ul.is_default DESC, l.id ASC';
+                WHERE l.tenant_id = :tenant_id
+                  AND l.status = "active"';
+
+        $params = [
+            ':user_id' => (int)$user['id'],
+            ':tenant_id' => $tenantId,
+            ':branch_prefix' => self::branchPrefix(),
+            ':branch_prefix2' => self::branchPrefix(),
+        ];
+
         try {
-            $stmt = Db::admin()->prepare($sql);
-            $stmt->execute([':user_id' => (int)$user['id']]);
-            return $stmt->fetchAll();
+            if (($user['role'] ?? '') === 'company_admin') {
+                $stmt = $admin->prepare($baseSelect . ' ORDER BY COALESCE(ul.is_default, 0) DESC, l.id ASC');
+            } else {
+                $stmt = $admin->prepare($baseSelect . ' AND ul.user_id IS NOT NULL ORDER BY ul.is_default DESC, l.id ASC');
+            }
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll();
+            return self::decorateBranchRows($rows);
         } catch (Throwable) {
             return [];
         }
     }
-
 
     public static function selectBranch(array $user, string $branchUid): bool
     {
@@ -173,8 +200,7 @@ final class Auth
             }
             $dbName = (string)($branch['branch_db_name'] ?? '');
             if ($dbName === '') {
-                $assignment = Db::findBranchAssignment($branchUid);
-                $dbName = (string)($assignment['branch_db_name'] ?? app_config('db_names.default_branch', ''));
+                $dbName = Db::branchDbNameForUid($branchUid);
             }
             if ($dbName === '') {
                 return false;
@@ -202,5 +228,25 @@ final class Auth
             'pharmacy_user', 'user', 'staff', '' => 'pharmacy_user',
             default => $role,
         };
+    }
+
+    /** @param array<int,array<string,mixed>> $rows @return array<int,array<string,mixed>> */
+    private static function decorateBranchRows(array $rows): array
+    {
+        foreach ($rows as &$row) {
+            if (empty($row['branch_uid']) && !empty($row['location_id'])) {
+                $row['branch_uid'] = Db::branchUidFromLocationId((int)$row['location_id']);
+            }
+            if (empty($row['branch_db_name']) && !empty($row['branch_uid'])) {
+                $row['branch_db_name'] = Db::branchDbNameForUid((string)$row['branch_uid']);
+            }
+        }
+        unset($row);
+        return $rows;
+    }
+
+    private static function branchPrefix(): string
+    {
+        return (string)app_config('db_name_patterns.branch_prefix', 'inprof3_tenants');
     }
 }
