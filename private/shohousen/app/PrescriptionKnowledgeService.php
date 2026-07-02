@@ -93,10 +93,16 @@ final class PrescriptionKnowledgeService
         if ($value === '') {
             return [];
         }
+        $minScoreSql = Db::columnExists(Db::knowledge(), 'prescription_auto_correction_rules', 'min_score')
+            ? ' AND precision_rate >= min_score'
+            : ' AND precision_rate >= 80.00';
+        // 1回だけの修正を即自動補正に使うと誤学習しやすいため、最低3回以上観測されたものだけ候補にする。
         $sql = 'SELECT * FROM prescription_auto_correction_rules
                 WHERE is_active = 1
                   AND field_type = :field_type
                   AND wrong_value = :wrong_value
+                  AND support_count >= 3'
+                  . $minScoreSql . '
                   AND (scope_type = "global" OR company_uid = :company_uid OR branch_uid = :branch_uid)
                 ORDER BY
                   CASE scope_type WHEN "branch" THEN 1 WHEN "company" THEN 2 ELSE 3 END,
@@ -182,10 +188,26 @@ final class PrescriptionKnowledgeService
         if (!in_array($fieldType, ['drug_name', 'drug_generic_name', 'drug_brand_name', 'drug_raw_text', 'usage_text', 'medical_institution_name'], true)) {
             return;
         }
+        $hasMinScore = Db::columnExists(Db::knowledge(), 'prescription_auto_correction_rules', 'min_score');
+        $columns = 'company_uid, branch_uid, scope_type, field_type, wrong_value, correct_value, support_count, success_count, failure_count, precision_rate';
+        $values = ':company_uid, :branch_uid, "branch", :field_type, :wrong_value, :correct_value, 1, 1, 0, 73.00';
+        if ($hasMinScore) {
+            $columns .= ', min_score';
+            $values .= ', 80.00';
+        }
         $sql = 'INSERT INTO prescription_auto_correction_rules
-                (company_uid, branch_uid, scope_type, field_type, wrong_value, correct_value, support_count, success_count, failure_count, precision_rate, is_active, created_at, updated_at)
-                VALUES (:company_uid, :branch_uid, "branch", :field_type, :wrong_value, :correct_value, 1, 1, 0, 100.00, 1, NOW(), NOW())
-                ON DUPLICATE KEY UPDATE support_count = support_count + 1, success_count = success_count + 1, precision_rate = (success_count / GREATEST(support_count, 1)) * 100, updated_at = NOW()';
+                (' . $columns . ', is_active, created_at, updated_at)
+                VALUES (' . $values . ', 1, NOW(), NOW())
+                ON DUPLICATE KEY UPDATE
+                    support_count = support_count + 1,
+                    success_count = success_count + 1,
+                    precision_rate = LEAST(97.00,
+                        50.00
+                        + LEAST(support_count + 1, 15) * 3.00
+                        + ((success_count + 1) / GREATEST(support_count + 1, 1)) * 20.00
+                        - (failure_count / GREATEST(support_count + 1, 1)) * 20.00
+                    ),
+                    updated_at = NOW()';
         try {
             $stmt = Db::knowledge()->prepare($sql);
             $stmt->execute([
@@ -275,6 +297,8 @@ final class PrescriptionKnowledgeService
                     ]);
                 }
             }
+
+            $this->saveFieldLearningScores($rows);
         } catch (Throwable) {
             // 補助学習DBへの保存失敗で処方箋確定保存を止めない。
         }
@@ -306,7 +330,7 @@ final class PrescriptionKnowledgeService
                     field_group = VALUES(field_group),
                     score_total = score_total + VALUES(score_total),
                     score_count = score_count + 1,
-                    avg_score = score_total / GREATEST(score_count, 1),
+                    avg_score = (score_total + VALUES(score_total)) / GREATEST(score_count + 1, 1),
                     selected_count = selected_count + VALUES(selected_count),
                     unselected_count = unselected_count + VALUES(unselected_count),
                     edited_count = edited_count + VALUES(edited_count),
@@ -351,13 +375,26 @@ final class PrescriptionKnowledgeService
 
     private function fieldLearningScore(bool $selected, bool $edited, bool $empty, bool $includeForOutput, bool $needsHumanCheck, ?float $confidence): float
     {
-        $score = $confidence !== null ? max(0.0, min(100.0, $confidence)) : 50.0;
-        $score += $selected ? 18.0 : -18.0;
-        $score += $includeForOutput ? 8.0 : 0.0;
-        $score += $edited ? 10.0 : 0.0;
-        $score += $empty ? -25.0 : 0.0;
-        $score += $needsHumanCheck ? -4.0 : 0.0;
+        // 使用項目選択用スコア。OCR補正ではなく、拠点運用として「出力候補に出すべきか」を数値化する。
+        $c = $this->normalizeConfidencePercent($confidence);
+        $score = 45.0 + (($c - 50.0) * 0.20);
+        $score += $selected ? 26.0 : -22.0;
+        $score += $includeForOutput ? 10.0 : 0.0;
+        $score += $edited ? 4.0 : 0.0;
+        $score += $empty ? -24.0 : 0.0;
+        $score += $needsHumanCheck ? -6.0 : 0.0;
         return round(max(0.0, min(100.0, $score)), 2);
+    }
+
+    private function normalizeConfidencePercent(?float $confidence): float
+    {
+        if ($confidence === null) {
+            return 50.0;
+        }
+        if ($confidence > 0.0 && $confidence <= 1.0) {
+            return max(0.0, min(100.0, $confidence * 100.0));
+        }
+        return max(0.0, min(100.0, $confidence));
     }
 
     /**
@@ -386,6 +423,105 @@ final class PrescriptionKnowledgeService
         } catch (Throwable) {
             return [];
         }
+    }
+
+
+    /**
+     * 修正確定時点の項目から、帳票レイアウトごとの項目出現・修正傾向を蓄積する。
+     * 文字そのものではなく、項目名・分類・帳票上の位置情報・表示順を主に使う。
+     *
+     * @param array<int,array<string,mixed>> $rows
+     */
+    public function saveLayoutFieldLearning(?int $parseJobId, int $tenantId, array $rows): void
+    {
+        if (!$parseJobId || !$rows || !Db::tableExists(Db::knowledge(), 'prescription_layout_field_learning_scores')) {
+            return;
+        }
+        $fingerprint = $this->layoutFingerprintForParseJob($parseJobId);
+        if ($fingerprint === '') {
+            return;
+        }
+
+        try {
+            $stmt = Db::knowledge()->prepare('INSERT INTO prescription_layout_field_learning_scores
+                (company_uid, branch_uid, tenant_id, layout_fingerprint, field_key, field_label, field_group,
+                 source_section, observed_count, edited_count, added_count, empty_count, confidence_total, confidence_count,
+                 avg_confidence, display_order_total, display_order_count, avg_display_order, last_seen_at, created_at, updated_at)
+                VALUES
+                (:company_uid, :branch_uid, :tenant_id, :layout_fingerprint, :field_key, :field_label, :field_group,
+                 :source_section, 1, :edited_count, :added_count, :empty_count, :confidence_total, :confidence_count,
+                 :avg_confidence, :display_order_total, 1, :avg_display_order, NOW(), NOW(), NOW())
+                ON DUPLICATE KEY UPDATE
+                    field_label = VALUES(field_label),
+                    field_group = VALUES(field_group),
+                    source_section = CASE WHEN VALUES(source_section) <> "" THEN VALUES(source_section) ELSE source_section END,
+                    observed_count = observed_count + 1,
+                    edited_count = edited_count + VALUES(edited_count),
+                    added_count = added_count + VALUES(added_count),
+                    empty_count = empty_count + VALUES(empty_count),
+                    confidence_total = confidence_total + VALUES(confidence_total),
+                    confidence_count = confidence_count + VALUES(confidence_count),
+                    avg_confidence = (confidence_total + VALUES(confidence_total)) / GREATEST(confidence_count + VALUES(confidence_count), 1),
+                    display_order_total = display_order_total + VALUES(display_order_total),
+                    display_order_count = display_order_count + 1,
+                    avg_display_order = (display_order_total + VALUES(display_order_total)) / GREATEST(display_order_count + 1, 1),
+                    last_seen_at = NOW(),
+                    updated_at = NOW()');
+
+            foreach ($rows as $row) {
+                $ai = trim((string)($row['source_ai_value'] ?? ''));
+                $final = trim((string)($row['field_value'] ?? ''));
+                $edited = $ai !== '' && $final !== '' && $this->normalizeLearningValue($ai) !== $this->normalizeLearningValue($final);
+                $added = $ai === '' && $final !== '';
+                $empty = $final === '';
+                $confidence = is_numeric($row['confidence'] ?? null) ? $this->normalizeConfidencePercent((float)$row['confidence']) : null;
+                $order = (int)($row['display_order'] ?? 9999);
+                $stmt->execute([
+                    ':company_uid' => current_company_uid(),
+                    ':branch_uid' => current_branch_uid(),
+                    ':tenant_id' => $tenantId,
+                    ':layout_fingerprint' => $fingerprint,
+                    ':field_key' => mb_substr($this->normalizeFieldKey((string)($row['field_key'] ?? 'field')), 0, 120),
+                    ':field_label' => mb_substr((string)($row['field_label'] ?? $row['field_key'] ?? 'field'), 0, 160),
+                    ':field_group' => in_array((string)($row['field_group'] ?? 'other'), ['patient','insurance','public_expense','prescription','medical_institution','medication','pharmacy','note','qr','other'], true) ? (string)$row['field_group'] : 'other',
+                    ':source_section' => mb_substr((string)($row['source_section'] ?? ''), 0, 160),
+                    ':edited_count' => $edited ? 1 : 0,
+                    ':added_count' => $added ? 1 : 0,
+                    ':empty_count' => $empty ? 1 : 0,
+                    ':confidence_total' => $confidence ?? 0,
+                    ':confidence_count' => $confidence === null ? 0 : 1,
+                    ':avg_confidence' => $confidence ?? 0,
+                    ':display_order_total' => $order,
+                    ':avg_display_order' => $order,
+                ]);
+            }
+        } catch (Throwable) {
+        }
+    }
+
+    private function layoutFingerprintForParseJob(int $parseJobId): string
+    {
+        try {
+            if (Db::tableExists(Db::knowledge(), 'prescription_template_candidates')) {
+                $stmt = Db::knowledge()->prepare('SELECT detected_fingerprint FROM prescription_template_candidates WHERE parse_job_id = :parse_job_id ORDER BY id DESC LIMIT 1');
+                $stmt->execute([':parse_job_id' => $parseJobId]);
+                $fp = (string)$stmt->fetchColumn();
+                if ($fp !== '') {
+                    return $fp;
+                }
+            }
+            if (Db::tableExists(Db::knowledge(), 'prescription_template_match_logs') && Db::tableExists(Db::knowledge(), 'prescription_templates')) {
+                $stmt = Db::knowledge()->prepare('SELECT pt.layout_fingerprint
+                    FROM prescription_template_match_logs ml
+                    INNER JOIN prescription_templates pt ON pt.id = ml.matched_template_id
+                    WHERE ml.parse_job_id = :parse_job_id
+                    ORDER BY ml.id DESC LIMIT 1');
+                $stmt->execute([':parse_job_id' => $parseJobId]);
+                return (string)$stmt->fetchColumn();
+            }
+        } catch (Throwable) {
+        }
+        return '';
     }
 
 
@@ -645,7 +781,7 @@ final class PrescriptionKnowledgeService
     /**
      * 補助学習DBに蓄積された人間修正傾向をOpenAIの読み取りプロンプトへ渡す短いヒントにする。
      */
-    public function buildOpenAiLearningHints(int $limit = 18): string
+    public function buildOpenAiLearningHints(string $layoutFingerprint = '', int $limit = 18): string
     {
         $hints = [];
         try {
@@ -687,6 +823,25 @@ final class PrescriptionKnowledgeService
                     }
                 }
             }
+            if ($layoutFingerprint !== '' && Db::tableExists(Db::knowledge(), 'prescription_layout_field_learning_scores')) {
+                $stmt = Db::knowledge()->prepare('SELECT field_label, field_group, source_section, avg_display_order, observed_count, edited_count, added_count, avg_confidence
+                    FROM prescription_layout_field_learning_scores
+                    WHERE company_uid = :company_uid
+                      AND branch_uid = :branch_uid
+                      AND layout_fingerprint = :layout_fingerprint
+                    ORDER BY edited_count DESC, added_count DESC, observed_count DESC, avg_confidence ASC
+                    LIMIT 10');
+                $stmt->execute([
+                    ':company_uid' => current_company_uid(),
+                    ':branch_uid' => current_branch_uid(),
+                    ':layout_fingerprint' => $layoutFingerprint,
+                ]);
+                foreach ($stmt->fetchAll() as $row) {
+                    $section = trim((string)($row['source_section'] ?? '')) ?: '位置不明';
+                    $hints[] = '- レイアウト: 「' . (string)$row['field_label'] . '」はこの帳票では ' . $section . ' 周辺に出やすい。空欄枠でも項目として残し、曖昧なら要確認にする。';
+                }
+            }
+
         } catch (Throwable) {
             return '';
         }
@@ -767,17 +922,20 @@ final class PrescriptionKnowledgeService
 
     private function confirmedCorrectionScore(string $correctionType, ?float $confidence, bool $needsHumanCheck, string $fieldGroup): float
     {
-        $score = $confidence !== null ? max(0.0, min(100.0, $confidence)) : 50.0;
-        $score += match ($correctionType) {
-            'edited' => 25.0,
-            'added' => 18.0,
-            'emptied' => -12.0,
-            'confirmed' => 8.0,
-            default => 0.0,
+        // OCR補正用スコア。高いほど「次回AIへ注意点として渡す価値が高い」。
+        // confirmed は低め、edited/added は高めにし、全件100点にならないようにする。
+        $c = $this->normalizeConfidencePercent($confidence);
+        $uncertainty = 100.0 - $c;
+        $score = match ($correctionType) {
+            'edited' => 58.0 + ($uncertainty * 0.18),
+            'added' => 52.0 + ($uncertainty * 0.15),
+            'emptied' => 42.0 + ($uncertainty * 0.12),
+            'confirmed' => 18.0 + ($c * 0.12),
+            default => 35.0,
         };
         $score += $needsHumanCheck ? 8.0 : 0.0;
         $score += in_array($fieldGroup, ['medication','medical_institution'], true) ? 8.0 : 0.0;
-        return round(max(0.0, min(100.0, $score)), 2);
+        return round(max(0.0, min(96.0, $score)), 2);
     }
 
     private function correctionPromptHint(string $fieldLabel, string $fieldGroup, string $fieldKey, string $aiSample, string $finalSample, string $correctionType, string $riskLevel): string

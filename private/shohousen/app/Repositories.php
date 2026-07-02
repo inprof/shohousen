@@ -139,6 +139,18 @@ function find_or_create_medical_institution(int $tenantId, array $input): ?int
 }
 
 
+
+function is_learning_only_prescription_field(string $key, string $label): bool
+{
+    $text = mb_strtolower($key . ' ' . $label);
+    foreach (['raw_drug_text', '薬品名元テキスト', '元テキスト', 'generic_name', '一般名候補', 'brand_name', '商品名候補', 'relation_type', '薬品名の関係', 'drug_name_relation', 'name_relation'] as $needle) {
+        if (str_contains($text, mb_strtolower($needle))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /**
  * 解析結果確認画面で「出力・学習対象」に選択された動的項目をPOSTから復元する。
  * 固定帳票ではなく、処方箋ごとに変動する項目/セルもこの配列として保存する。
@@ -183,6 +195,10 @@ function selected_prescription_fields_from_post(array $post): array
         $group = trim((string)($groups[$i] ?? 'other'));
         if (!in_array($group, ['patient','insurance','public_expense','prescription','medical_institution','medication','pharmacy','note','qr','other'], true)) {
             $group = 'other';
+        }
+
+        if (is_learning_only_prescription_field($key, $label)) {
+            continue;
         }
 
         // 何も値がなく、かつ未選択の項目は保存しない。空欄だが選択された項目は「空欄確認済み」として保存する。
@@ -243,6 +259,78 @@ function save_prescription_selected_fields(PDO $pdo, int $tenantId, int $prescri
             ':display_order' => (int)$row['display_order'],
         ]);
     }
+}
+
+
+/**
+ * 保存済み処方箋から使用項目選択画面用の行を再構築する。
+ * prescription_selected_fields が空の場合でも、患者/保険/医療機関/薬品の保存済みデータから最低限の選択行を復元する。
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function default_selected_fields_from_prescription(array $prescription): array
+{
+    $rows = [];
+    $add = static function (string $key, string $label, string $group, mixed $value, mixed $aiValue = null, int $order = 9999) use (&$rows): void {
+        $value = trim((string)$value);
+        $aiValue = trim((string)($aiValue ?? $value));
+        if ($value === '' && $aiValue === '') {
+            return;
+        }
+        $rows[] = [
+            'field_key' => mb_substr($key, 0, 120),
+            'field_label' => mb_substr($label, 0, 160),
+            'field_group' => $group,
+            'field_value' => $value,
+            'source_ai_value' => $aiValue,
+            'source_section' => '保存済みデータから復元',
+            'confidence' => null,
+            'needs_human_check' => $aiValue !== '' && $value !== '' && $aiValue !== $value,
+            'is_selected' => true,
+            'include_for_output' => true,
+            'display_order' => $order,
+        ];
+    };
+
+    $add('patient.name', '患者名', 'patient', $prescription['patient_name'] ?? '', null, 10);
+    $add('patient.gender', '性別', 'patient', $prescription['gender'] ?? '', null, 20);
+    $add('patient.birth_date', '生年月日', 'patient', $prescription['birth_date'] ?? '', null, 30);
+    $add('insurance.insurance_no', '保険者番号', 'insurance', $prescription['insurance_no'] ?? '', null, 40);
+    $add('insurance.insured_symbol_number', '記号番号', 'insurance', $prescription['insured_symbol_number'] ?? '', null, 50);
+    $add('insurance.copay_rate', '負担割合', 'insurance', $prescription['copay_rate'] ?? '', null, 60);
+    $add('prescription.issued_on', '処方箋発行日', 'prescription', $prescription['issued_on'] ?? '', null, 70);
+    $add('medical_institution.code', '医療機関コード', 'medical_institution', $prescription['institution_code'] ?? '', null, 80);
+    $add('medical_institution.name', '医療機関名', 'medical_institution', $prescription['medical_name'] ?? '', null, 90);
+
+    foreach ((array)($prescription['medications'] ?? []) as $i => $med) {
+        $n = $i + 1;
+        $base = 1000 + ($i * 20);
+        $add('medications.' . $n . '.drug_name', '処方' . $n . ' 薬品名', 'medication', $med['drug_name'] ?? '', $med['ai_drug_name'] ?? null, $base + 1);
+        $add('medications.' . $n . '.usage_text', '処方' . $n . ' 用法', 'medication', $med['usage_text'] ?? '', $med['ai_usage_text'] ?? null, $base + 2);
+        $add('medications.' . $n . '.days_count', '処方' . $n . ' 日数', 'medication', $med['days_count'] ?? '', $med['ai_days_count'] ?? null, $base + 3);
+        $add('medications.' . $n . '.amount_text', '処方' . $n . ' 総量/備考', 'medication', $med['amount_text'] ?? '', $med['ai_amount_text'] ?? null, $base + 4);
+    }
+
+    return $rows;
+}
+
+function ensure_prescription_selected_fields_for_prescription(int $tenantId, int $prescriptionId, array $prescription): array
+{
+    $existing = (array)($prescription['selected_fields'] ?? []);
+    if ($existing) {
+        return $existing;
+    }
+    $rows = default_selected_fields_from_prescription($prescription);
+    if ($rows && Db::tableExists(Db::branch(), 'prescription_selected_fields')) {
+        save_prescription_selected_fields(Db::branch(), $tenantId, $prescriptionId, isset($prescription['parse_job_id']) ? (int)$prescription['parse_job_id'] : null, $rows);
+        $stmt = Db::branch()->prepare('SELECT * FROM prescription_selected_fields WHERE prescription_id = :id ORDER BY display_order, id');
+        $stmt->execute([':id' => $prescriptionId]);
+        $saved = $stmt->fetchAll();
+        if ($saved) {
+            return $saved;
+        }
+    }
+    return $rows;
 }
 
 
@@ -314,6 +402,18 @@ function update_prescription_selected_fields_from_post(int $tenantId, int $presc
         } else {
             $stmtByKey->execute($params + [':field_key' => mb_substr((string)$key, 0, 120)]);
         }
+    }
+
+    // 使用項目選択はOCR補正学習ではなく、拠点ごとの出力項目の採用傾向として保存する。
+    try {
+        $stmt = $pdo->prepare('SELECT * FROM prescription_selected_fields WHERE prescription_id = :id ORDER BY display_order, id');
+        $stmt->execute([':id' => $prescriptionId]);
+        $rows = $stmt->fetchAll();
+        if ($rows) {
+            $parseJobId = isset($rows[0]['parse_job_id']) ? (int)$rows[0]['parse_job_id'] : null;
+            (new PrescriptionKnowledgeService())->saveFieldObservations($parseJobId, $tenantId, $prescriptionId, $rows);
+        }
+    } catch (Throwable) {
     }
 }
 
@@ -495,9 +595,8 @@ function create_prescription_from_post(array $user, array $post): int
         $selectedFields = selected_prescription_fields_from_post($post);
         save_prescription_selected_fields($pdo, $tenantId, $prescriptionId, $parseJobId, $selectedFields);
 
-        if ($selectedFields) {
-            (new PrescriptionKnowledgeService())->saveFieldObservations($parseJobId, $tenantId, $prescriptionId, $selectedFields);
-        }
+        // 使用項目の採用傾向は次の使用項目選択画面で保存する。
+        // ここではOCR補正・レイアウト学習だけを行う。
 
         // 解析結果確認画面で人間修正が確定した時点で、補助学習DBへ反映する。
         // 使用項目の選択は拠点ごとの運用設定なので、補助学習スコアには使わない。
@@ -505,6 +604,7 @@ function create_prescription_from_post(array $user, array $post): int
             $knowledge = new PrescriptionKnowledgeService();
             if ($selectedFields) {
                 $knowledge->saveConfirmedCorrectionLearning($parseJobId, $tenantId, correction_learning_rows_from_selected_fields($selectedFields));
+                $knowledge->saveLayoutFieldLearning($parseJobId, $tenantId, $selectedFields);
             }
             $drugLearningRows = medication_name_learning_rows_from_post($post);
             if ($drugLearningRows) {

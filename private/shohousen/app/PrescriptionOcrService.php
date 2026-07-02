@@ -64,7 +64,7 @@ final class PrescriptionOcrService
         $openaiStart = microtime(true);
         try {
             $pdo->prepare('UPDATE prescription_parse_jobs SET status = "analyzing" WHERE id = :id')->execute([':id' => $jobId]);
-            $ai = $this->openai->extractFromImage($stored['path'], $stored['mime_type'], $template);
+            $ai = $this->openai->extractFromImage($stored['path'], $stored['mime_type'], $template ?: $detectedTemplateMeta);
             $openaiMs = self::elapsedMs($openaiStart);
             $correctionStart = microtime(true);
             $normalized = $this->correction->applyCandidates($ai['normalized']);

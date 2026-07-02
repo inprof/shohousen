@@ -20,7 +20,7 @@ final class OpenAiPrescriptionClient
         $schema = self::responseSchema();
         $learningHints = '';
         try {
-            $learningHints = (new PrescriptionKnowledgeService())->buildOpenAiLearningHints();
+            $learningHints = (new PrescriptionKnowledgeService())->buildOpenAiLearningHints((string)($templateHint['layout_fingerprint'] ?? ''));
         } catch (Throwable) {
             $learningHints = '';
         }
@@ -140,6 +140,7 @@ final class OpenAiPrescriptionClient
 処方箋の様式は医療機関・拠点ごとに異なるため、固定テンプレートだけに寄せず、画像内に見える項目名と値をできる限り form_fields に列挙してください。
 form_fields には、空欄でも帳票上に存在する主要項目を入れてください。例: 公費負担者番号、公費負担医療の受給者番号、保険者番号、被保険者証の記号番号、患者氏名、フリガナ、生年月日、性別、区分、交付年月日、処方箋使用期間、医療機関所在地、医療機関名、電話番号、保険医氏名、都道府県番号、点数表番号、医療機関コード、備考、保険医署名、薬品名、用量、用法、日数、QR有無など。
 画面側では field_group と value_type を見て、form_fields から修正用の入力一覧を動的に生成します。画像内に見える項目は、固定項目に入らなくても form_fields に残してください。
+source_section には、上部左、上部右、患者欄、保険欄、医療機関欄、処方欄、備考欄、下部QRなど、帳票上の位置が分かる表現を入れてください。これは拠点別レイアウト学習に使います。
 出力に使うかどうかは人間が後で選択するため、include_default は「通常出力に使いそうな項目」だけ true にし、それ以外も form_fields には残してください。
 出力は必ず指定JSON Schemaに従い、余計な文章を含めないでください。
 数字、日付、薬品名、用法、日数は特に慎重に扱ってください。

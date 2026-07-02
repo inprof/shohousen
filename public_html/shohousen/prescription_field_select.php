@@ -39,7 +39,8 @@ if (!$prescription) {
     exit('保存済みデータが見つかりません。解析結果確認画面で「修正内容をDB保存して次へ」を押してください。');
 }
 
-$rows = array_values(array_filter((array)($prescription['selected_fields'] ?? []), static function (array $row): bool {
+$selectedFields = ensure_prescription_selected_fields_for_prescription($tenantId, $prescriptionId, $prescription);
+$rows = array_values(array_filter($selectedFields, static function (array $row): bool {
     $key = (string)($row['field_key'] ?? '');
     return !preg_match('/\.(generic_name|brand_name|raw_drug_text|relation_type)$/', $key)
         && !str_contains($key, 'raw_drug_text')

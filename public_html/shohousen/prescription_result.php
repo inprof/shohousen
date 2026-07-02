@@ -129,6 +129,18 @@ function upsert_review_field(array &$rows, array $field): void
     $rows[$key]['display_order'] = min((int)$rows[$key]['display_order'], (int)$row['display_order']);
 }
 
+
+function is_learning_only_review_field(string $key, string $label): bool
+{
+    $text = mb_strtolower($key . ' ' . $label);
+    foreach (['raw_drug_text', '薬品名元テキスト', '元テキスト', 'generic_name', '一般名候補', 'brand_name', '商品名候補', 'relation_type', '薬品名の関係', 'drug_name_relation', 'name_relation'] as $needle) {
+        if (str_contains($text, mb_strtolower($needle))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 function render_dynamic_value_control(string $name, string $value, string $uiTemplate, string $valueType, string $fieldKey): string
 {
     $uiTemplate = in_array($uiTemplate, ['input','textarea','date','number','select','checkbox','drug_line','blank_cell','unknown'], true) ? $uiTemplate : 'input';
@@ -190,6 +202,11 @@ foreach ($fixedDefinitions as [$key, $label, $group, $value, $valueType, $uiTemp
 }
 foreach ($dynamicFields as $i => $field) {
     if (!is_array($field)) {
+        continue;
+    }
+    $fieldKeyForFilter = (string)($field['field_key'] ?? '');
+    $fieldLabelForFilter = (string)($field['field_label'] ?? '');
+    if (is_learning_only_review_field($fieldKeyForFilter, $fieldLabelForFilter)) {
         continue;
     }
     $field['display_order'] = $field['display_order'] ?? (1000 + $i);
