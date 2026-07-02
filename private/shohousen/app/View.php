@@ -11,6 +11,19 @@ final class View
         echo '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">';
         echo '<title>' . h($title) . ' | ' . h(app_config('app.name', 'PharmaAssist')) . '</title>';
         echo '<link rel="stylesheet" href="' . h(app_url('/assets/css/app.css')) . '">';
+        $styles = $options['styles'] ?? [];
+        if (is_string($styles)) {
+            $styles = [$styles];
+        }
+        if (is_array($styles)) {
+            foreach ($styles as $stylePath) {
+                $stylePath = trim((string)$stylePath);
+                if ($stylePath === '') {
+                    continue;
+                }
+                echo '<link rel="stylesheet" href="' . h(app_url($stylePath)) . '">';
+            }
+        }
         echo '</head><body class="' . h($bodyClass) . '">';
         echo '<header class="app-header">';
         echo '<a class="brand" href="' . h(app_url('/index.php')) . '"><span class="brand-icon">✚</span><span>' . h(app_config('app.name', 'PharmaAssist')) . '</span></a>';

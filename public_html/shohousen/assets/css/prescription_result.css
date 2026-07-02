@@ -1,0 +1,198 @@
+/* =========================================================
+   Prescription OCR dynamic fields
+   解析結果・使用項目選択で共通利用する処方箋OCR項目UI。
+   app.cssには置かず、処方箋系画面でのみ読み込む。
+   ========================================================= */
+.dynamic-field-card {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.dynamic-field-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+.dynamic-field-head h2 {
+  margin: 0 0 6px;
+}
+.dynamic-field-head p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.field-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+.btn.small {
+  padding: 8px 10px;
+  font-size: 12px;
+}
+.dynamic-field-grid {
+  display: grid;
+  gap: 10px;
+}
+.dynamic-field-group {
+  margin: 18px 0 4px;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: #f3f6fa;
+  color: var(--text);
+  font-size: 15px;
+}
+.dynamic-field-row {
+  display: grid;
+  grid-template-columns: 86px minmax(0, 1fr);
+  gap: 12px;
+  align-items: stretch;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: #fff;
+}
+.dynamic-field-row.needs-check {
+  border-color: #f2c94c;
+  background: #fffdf3;
+}
+.field-use-check {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  min-height: 48px;
+  padding: 8px;
+  border-radius: 10px;
+  background: #f7f9fc;
+  font-weight: 700;
+}
+.field-use-check input {
+  width: 18px;
+  height: 18px;
+}
+.field-main label {
+  display: block;
+}
+.field-label {
+  display: block;
+  margin-bottom: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+.field-main input {
+  width: 100%;
+}
+.field-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+.field-meta span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #526071;
+  font-size: 11px;
+}
+.field-meta .attention {
+  background: #fff0d5;
+  color: #8a5a00;
+}
+.saved-fields-table {
+  margin-top: 10px;
+}
+.muted-row {
+  opacity: .58;
+}
+
+@media (max-width: 700px) {
+  .dynamic-field-head {
+    display: block;
+  }
+  .field-actions {
+    margin-top: 10px;
+  }
+  .dynamic-field-row {
+    grid-template-columns: 1fr;
+  }
+  .field-use-check {
+    justify-content: flex-start;
+  }
+}
+
+/* =========================================================
+   Prescription result review screen
+   解析結果確認・人間修正画面専用。
+   ========================================================= */
+/* Medication name learning UI */
+.form-help {
+  margin: 4px 0 14px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+.edit-med-row textarea {
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
+}
+.edit-med-row .med-field-main,
+.edit-med-row .med-field-raw {
+  grid-column: span 2;
+}
+.med-delete-button {
+  grid-column: span 2;
+  border-color: #fecaca;
+  color: #b91c1c;
+  background: #fff7f7;
+}
+.med-list-actions {
+  margin: 8px 0 18px;
+}
+@media (max-width: 700px) {
+  .edit-med-row .med-field-main,
+  .edit-med-row .med-field-raw,
+  .med-delete-button {
+    grid-column: span 1;
+  }
+}
+
+/* Result review screen: AI detected fields are edited here, selection happens on next page. */
+.dynamic-field-review-card .dynamic-field-grid {
+  gap: 12px;
+}
+.review-field-row {
+  grid-template-columns: 1fr;
+}
+.field-main.full {
+  width: 100%;
+}
+.review-field-grid {
+  display: grid;
+  grid-template-columns: minmax(160px, .9fr) minmax(130px, .6fr) minmax(240px, 2fr);
+  gap: 12px;
+  align-items: end;
+}
+.review-field-grid input,
+.review-field-grid select,
+.review-field-grid textarea {
+  width: 100%;
+}
+.review-field-value {
+  grid-column: span 1;
+}
+.manual-added-field {
+  border-style: dashed;
+  border-color: #93c5fd;
+  background: #f8fbff;
+}
+@media (max-width: 760px) {
+  .review-field-grid {
+    grid-template-columns: 1fr;
+  }
+}

@@ -301,7 +301,7 @@ function create_prescription_from_post(array $user, array $post): int
         $stockStatuses = $post['stock_status'] ?? [];
 
         $medOptionalColumns = [];
-        foreach (['generic_name','brand_name','raw_drug_text','ai_drug_name','ai_generic_name','ai_brand_name','drug_name_relation_type'] as $column) {
+        foreach (['generic_name','brand_name','raw_drug_text','ai_drug_name','ai_generic_name','ai_brand_name','ai_raw_drug_text','drug_name_relation_type'] as $column) {
             if (Db::columnExists($pdo, 'prescription_medications', $column)) {
                 $medOptionalColumns[] = $column;
             }
@@ -350,6 +350,7 @@ function create_prescription_from_post(array $user, array $post): int
                     'ai_drug_name' => trim((string)($aiDrugNames[$i] ?? '')) ?: null,
                     'ai_generic_name' => trim((string)($aiGenericNames[$i] ?? '')) ?: null,
                     'ai_brand_name' => trim((string)($aiBrandNames[$i] ?? '')) ?: null,
+                    'ai_raw_drug_text' => trim((string)($post['ai_raw_drug_text'][$i] ?? '')) ?: null,
                     'drug_name_relation_type' => $relation,
                     default => null,
                 };

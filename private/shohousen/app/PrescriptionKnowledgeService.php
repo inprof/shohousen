@@ -275,9 +275,91 @@ final class PrescriptionKnowledgeService
                     ]);
                 }
             }
+
+            $this->saveFieldLearningScores($rows);
         } catch (Throwable) {
             // 補助学習DBへの保存失敗で処方箋確定保存を止めない。
         }
+    }
+
+    /**
+     * 選択・修正結果を「重み」相当のスコアへ変換して蓄積する。
+     * 実際のAIモデルの重みではなく、拠点ごとの項目採用傾向・修正傾向を数値化する。
+     *
+     * @param array<int,array<string,mixed>> $rows
+     */
+    private function saveFieldLearningScores(array $rows): void
+    {
+        if (!$rows || !Db::tableExists(Db::knowledge(), 'prescription_field_learning_scores')) {
+            return;
+        }
+
+        try {
+            $stmt = Db::knowledge()->prepare('INSERT INTO prescription_field_learning_scores
+                (company_uid, branch_uid, field_key, field_label, field_group, score_total, score_count, avg_score,
+                 selected_count, unselected_count, edited_count, empty_count, last_confidence, last_ai_value_sample,
+                 last_final_value_sample, last_action_type, last_seen_at, created_at, updated_at)
+                VALUES
+                (:company_uid, :branch_uid, :field_key, :field_label, :field_group, :score, 1, :score,
+                 :selected_count, :unselected_count, :edited_count, :empty_count, :last_confidence, :last_ai_value_sample,
+                 :last_final_value_sample, :last_action_type, NOW(), NOW(), NOW())
+                ON DUPLICATE KEY UPDATE
+                    field_label = VALUES(field_label),
+                    field_group = VALUES(field_group),
+                    score_total = score_total + VALUES(score_total),
+                    score_count = score_count + 1,
+                    avg_score = score_total / GREATEST(score_count, 1),
+                    selected_count = selected_count + VALUES(selected_count),
+                    unselected_count = unselected_count + VALUES(unselected_count),
+                    edited_count = edited_count + VALUES(edited_count),
+                    empty_count = empty_count + VALUES(empty_count),
+                    last_confidence = VALUES(last_confidence),
+                    last_ai_value_sample = VALUES(last_ai_value_sample),
+                    last_final_value_sample = VALUES(last_final_value_sample),
+                    last_action_type = VALUES(last_action_type),
+                    last_seen_at = NOW(),
+                    updated_at = NOW()');
+
+            foreach ($rows as $row) {
+                $ai = trim((string)($row['source_ai_value'] ?? ''));
+                $final = trim((string)($row['field_value'] ?? ''));
+                $selected = !empty($row['is_selected']);
+                $edited = $ai !== '' && $final !== '' && $ai !== $final;
+                $empty = $final === '';
+                $confidence = is_numeric($row['confidence'] ?? null) ? (float)$row['confidence'] : null;
+                $score = $this->fieldLearningScore($selected, $edited, $empty, !empty($row['include_for_output']), !empty($row['needs_human_check']), $confidence);
+                $actionType = !$selected ? 'unselected' : ($empty ? 'empty' : ($edited ? 'edited' : ($ai === '' && $final !== '' ? 'added' : 'confirmed')));
+
+                $stmt->execute([
+                    ':company_uid' => current_company_uid(),
+                    ':branch_uid' => current_branch_uid(),
+                    ':field_key' => $row['field_key'],
+                    ':field_label' => $row['field_label'],
+                    ':field_group' => $row['field_group'],
+                    ':score' => $score,
+                    ':selected_count' => $selected ? 1 : 0,
+                    ':unselected_count' => $selected ? 0 : 1,
+                    ':edited_count' => $edited ? 1 : 0,
+                    ':empty_count' => $empty ? 1 : 0,
+                    ':last_confidence' => $confidence,
+                    ':last_ai_value_sample' => mb_substr($ai, 0, 255),
+                    ':last_final_value_sample' => mb_substr($final, 0, 255),
+                    ':last_action_type' => $actionType,
+                ]);
+            }
+        } catch (Throwable) {
+        }
+    }
+
+    private function fieldLearningScore(bool $selected, bool $edited, bool $empty, bool $includeForOutput, bool $needsHumanCheck, ?float $confidence): float
+    {
+        $score = $confidence !== null ? max(0.0, min(100.0, $confidence)) : 50.0;
+        $score += $selected ? 18.0 : -18.0;
+        $score += $includeForOutput ? 8.0 : 0.0;
+        $score += $edited ? 10.0 : 0.0;
+        $score += $empty ? -25.0 : 0.0;
+        $score += $needsHumanCheck ? -4.0 : 0.0;
+        return round(max(0.0, min(100.0, $score)), 2);
     }
 
     /**

@@ -42,23 +42,30 @@ function original_dynamic_fields_from_post(array $post): array
     $labels = $post['original_dynamic_label'] ?? [];
     $groups = $post['original_dynamic_group'] ?? [];
     $values = $post['original_dynamic_value'] ?? [];
+    $aiValues = $post['original_dynamic_ai_value'] ?? [];
     $sections = $post['original_dynamic_source_section'] ?? [];
     $confidences = $post['original_dynamic_confidence'] ?? [];
     $needs = $post['original_dynamic_needs_human_check'] ?? [];
     $include = $post['original_dynamic_include_default'] ?? [];
     $rows = [];
     foreach ($keys as $i => $key) {
-        $key = normalize_field_key((string)$key);
         $label = trim((string)($labels[$i] ?? $key));
+        $key = normalize_field_key((string)$key);
+        if ($key === 'manual_field') {
+            $key = normalize_field_key('manual_' . ($label !== '' ? $label : 'field') . '_' . (string)($i + 1));
+        }
+        $value = trim((string)($values[$i] ?? ''));
+        $aiValue = trim((string)($aiValues[$i] ?? $value));
         $rows[] = [
             'index' => $i,
             'key' => $key,
             'label' => $label !== '' ? $label : $key,
             'group' => trim((string)($groups[$i] ?? 'other')) ?: 'other',
-            'value' => trim((string)($values[$i] ?? '')),
+            'value' => $value,
+            'ai_value' => $aiValue,
             'section' => trim((string)($sections[$i] ?? '')),
             'confidence' => is_numeric($confidences[$i] ?? null) ? (float)$confidences[$i] : null,
-            'needs' => isset($needs[$i]) && (string)$needs[$i] === '1',
+            'needs' => (isset($needs[$i]) && (string)$needs[$i] === '1') || ($aiValue !== '' && $value !== '' && $aiValue !== $value),
             'include_default' => isset($include[$i]) && (string)$include[$i] === '1',
         ];
     }
@@ -89,7 +96,7 @@ function find_original_med_value(array $originals, int $medIndex, string $type, 
         }
         foreach ($typeWords as $word) {
             if (str_contains($target, $word)) {
-                return ['value' => (string)($row['value'] ?? $fallback), 'index' => (int)$row['index']];
+                return ['value' => (string)($row['ai_value'] ?? ($row['value'] ?? $fallback)), 'index' => (int)$row['index']];
             }
         }
     }
@@ -143,19 +150,30 @@ $drugNames = $post['drug_name'] ?? [];
 $usageTexts = $post['usage_text'] ?? [];
 $daysCounts = $post['days_count'] ?? [];
 $amountTexts = $post['amount_text'] ?? [];
+$genericNames = $post['generic_name'] ?? [];
+$brandNames = $post['brand_name'] ?? [];
+$rawDrugTexts = $post['raw_drug_text'] ?? [];
+$relationTypes = $post['drug_name_relation_type'] ?? [];
 $stockStatuses = $post['stock_status'] ?? [];
 $aiDrugNames = $post['ai_drug_name'] ?? [];
+$aiGenericNames = $post['ai_generic_name'] ?? [];
+$aiBrandNames = $post['ai_brand_name'] ?? [];
+$aiRawDrugTexts = $post['ai_raw_drug_text'] ?? [];
+
 $aiUsageTexts = $post['ai_usage_text'] ?? [];
 $aiDaysCounts = $post['ai_days_count'] ?? [];
 $aiAmountTexts = $post['ai_amount_text'] ?? [];
 
-$medCount = max(count($drugNames), count($usageTexts), count($daysCounts), count($amountTexts));
+$medCount = max(count($drugNames), count($usageTexts), count($daysCounts), count($amountTexts), count($genericNames), count($brandNames), count($rawDrugTexts));
 for ($i = 0; $i < $medCount; $i++) {
     $drug = trim((string)($drugNames[$i] ?? ''));
     $usage = trim((string)($usageTexts[$i] ?? ''));
     $days = trim((string)($daysCounts[$i] ?? ''));
     $amount = trim((string)($amountTexts[$i] ?? ''));
-    if ($drug === '' && $usage === '' && $days === '' && $amount === '') {
+    $generic = trim((string)($genericNames[$i] ?? ''));
+    $brand = trim((string)($brandNames[$i] ?? ''));
+    $rawDrug = trim((string)($rawDrugTexts[$i] ?? ''));
+    if ($drug === '' && $usage === '' && $days === '' && $amount === '' && $generic === '' && $brand === '' && $rawDrug === '') {
         continue;
     }
     $n = $i + 1;
@@ -168,10 +186,15 @@ for ($i = 0; $i < $medCount; $i++) {
             $usedOriginalIndexes[(int)$found['index']] = true;
         }
     }
+    $relation = trim((string)($relationTypes[$i] ?? 'unknown'));
     $rows[] = make_field_row("medication.$n.drug_name", "処方{$n}の薬品名", 'medication', $drug, $aiDrug['value'], '確定データ', null, false, $fieldPreferences, $drug !== '');
+    $rows[] = make_field_row("medication.$n.generic_name", "処方{$n}の一般名候補", 'medication', $generic, trim((string)($aiGenericNames[$i] ?? '')), '確定データ', null, false, $fieldPreferences, $generic !== '');
+    $rows[] = make_field_row("medication.$n.brand_name", "処方{$n}の商品名候補", 'medication', $brand, trim((string)($aiBrandNames[$i] ?? '')), '確定データ', null, false, $fieldPreferences, $brand !== '');
+    $rows[] = make_field_row("medication.$n.raw_drug_text", "処方{$n}の薬品名元テキスト", 'medication', $rawDrug, trim((string)($aiRawDrugTexts[$i] ?? '')), '確定データ', null, false, $fieldPreferences, $rawDrug !== '');
     $rows[] = make_field_row("medication.$n.usage_text", "処方{$n}の用法", 'medication', $usage, $aiUsage['value'], '確定データ', null, false, $fieldPreferences, $usage !== '');
     $rows[] = make_field_row("medication.$n.days_count", "処方{$n}の日数", 'medication', $days, $aiDays['value'], '確定データ', null, false, $fieldPreferences, $days !== '');
     $rows[] = make_field_row("medication.$n.amount_text", "処方{$n}の総量/備考", 'medication', $amount, $aiAmount['value'], '確定データ', null, false, $fieldPreferences, $amount !== '');
+    $rows[] = make_field_row("medication.$n.relation_type", "処方{$n}の薬品名関係", 'medication', $relation, '', '確定データ', null, false, $fieldPreferences, $relation !== '' && $relation !== 'unknown');
 }
 
 $existingKeys = array_fill_keys(array_map(static fn($row) => $row['key'], $rows), true);
@@ -193,10 +216,10 @@ foreach ($originals as $orig) {
         'label' => (string)$orig['label'],
         'group' => $group,
         'value' => (string)$orig['value'],
-        'ai_value' => (string)$orig['value'],
+        'ai_value' => (string)($orig['ai_value'] ?? $orig['value']),
         'section' => (string)$orig['section'],
         'confidence' => $orig['confidence'],
-        'needs' => (bool)$orig['needs'],
+        'needs' => (bool)$orig['needs'] || ((string)($orig['ai_value'] ?? '') !== '' && (string)($orig['ai_value'] ?? '') !== (string)$orig['value']),
         'selected' => $selected,
         'confirmed' => false,
     ];
@@ -214,7 +237,7 @@ usort($rows, static function (array $a, array $b) use ($groupOrder): int {
     return $ga <=> $gb;
 });
 
-View::header('使用項目の選択');
+View::header('使用項目の選択', ['styles' => ['/assets/css/prescription_field_select.css']]);
 ?>
 <section class="page-title">
   <h1>使用項目の選択</h1>
@@ -236,12 +259,23 @@ View::header('使用項目の選択');
       $usage = trim((string)($usageTexts[$i] ?? ''));
       $days = trim((string)($daysCounts[$i] ?? ''));
       $amount = trim((string)($amountTexts[$i] ?? ''));
-      if ($drug === '' && $usage === '' && $days === '' && $amount === '') { continue; }
+      $generic = trim((string)($genericNames[$i] ?? ''));
+      $brand = trim((string)($brandNames[$i] ?? ''));
+      $rawDrug = trim((string)($rawDrugTexts[$i] ?? ''));
+      if ($drug === '' && $usage === '' && $days === '' && $amount === '' && $generic === '' && $brand === '' && $rawDrug === '') { continue; }
     ?>
     <input type="hidden" name="drug_name[]" value="<?= h($drug) ?>">
     <input type="hidden" name="usage_text[]" value="<?= h($usage) ?>">
     <input type="hidden" name="days_count[]" value="<?= h($days) ?>">
     <input type="hidden" name="amount_text[]" value="<?= h($amount) ?>">
+    <input type="hidden" name="generic_name[]" value="<?= h(trim((string)($genericNames[$i] ?? ''))) ?>">
+    <input type="hidden" name="brand_name[]" value="<?= h(trim((string)($brandNames[$i] ?? ''))) ?>">
+    <input type="hidden" name="raw_drug_text[]" value="<?= h(trim((string)($rawDrugTexts[$i] ?? ''))) ?>">
+    <input type="hidden" name="drug_name_relation_type[]" value="<?= h(trim((string)($relationTypes[$i] ?? 'unknown'))) ?>">
+    <input type="hidden" name="ai_drug_name[]" value="<?= h(trim((string)($aiDrugNames[$i] ?? ''))) ?>">
+    <input type="hidden" name="ai_generic_name[]" value="<?= h(trim((string)($aiGenericNames[$i] ?? ''))) ?>">
+    <input type="hidden" name="ai_brand_name[]" value="<?= h(trim((string)($aiBrandNames[$i] ?? ''))) ?>">
+    <input type="hidden" name="ai_raw_drug_text[]" value="<?= h(trim((string)($aiRawDrugTexts[$i] ?? ''))) ?>">
     <input type="hidden" name="stock_status[]" value="<?= h((string)($stockStatuses[$i] ?? 'unknown')) ?>">
   <?php endfor; ?>
 

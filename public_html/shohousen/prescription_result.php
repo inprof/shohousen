@@ -51,7 +51,7 @@ usort($dynamicFields, static function (array $a, array $b) use ($fieldGroupOrder
     }
     return $ga <=> $gb;
 });
-View::header('解析結果確認');
+View::header('解析結果確認', ['styles' => ['/assets/css/prescription_result.css']]);
 ?>
 <section class="page-title"><h1>解析結果確認</h1><p>AI解析結果と補正候補を確認し、必要に応じて修正してから確定保存してください。QRは保存完了後に作成します。</p></section>
 <?php if (!empty($data['warnings'])): ?>
@@ -67,10 +67,19 @@ View::header('解析結果確認');
     <img src="<?= h(app_url('/prescription_job_image.php?job_id=' . (string)$jobId)) ?>" alt="撮影した処方箋画像" loading="lazy">
   </section>
 <?php endif; ?>
-<form class="card result-card" method="post" action="<?= h(app_url('/prescription_save.php')) ?>">
+<form class="card result-card" method="post" action="<?= h(app_url('/prescription_field_select.php')) ?>">
   <?= Csrf::field() ?>
   <input type="hidden" name="parse_job_id" value="<?= h((string)$jobId) ?>">
   <input type="hidden" name="ai_confidence" value="<?= h((string)($data['overall_confidence'] ?? '')) ?>">
+  <input type="hidden" name="ai_patient_name" value="<?= h((string)($patient['name'] ?? '')) ?>">
+  <input type="hidden" name="ai_gender" value="<?= h((string)($patient['gender'] ?? '')) ?>">
+  <input type="hidden" name="ai_birth_date" value="<?= h((string)($patient['birth_date'] ?? '')) ?>">
+  <input type="hidden" name="ai_insurance_no" value="<?= h((string)($insurance['insurance_no'] ?? '')) ?>">
+  <input type="hidden" name="ai_insured_symbol_number" value="<?= h((string)($insurance['insured_symbol_number'] ?? '')) ?>">
+  <input type="hidden" name="ai_copay_rate" value="<?= h((string)($insurance['copay_rate'] ?? '')) ?>">
+  <input type="hidden" name="ai_issued_on" value="<?= h((string)($prescription['issued_on'] ?? '')) ?>">
+  <input type="hidden" name="ai_medical_institution_code" value="<?= h((string)($medical['code'] ?? '')) ?>">
+  <input type="hidden" name="ai_medical_institution_name" value="<?= h((string)($medical['name'] ?? '')) ?>">
   <div class="info-columns">
     <section>
       <h2>患者情報</h2>
@@ -150,6 +159,9 @@ View::header('解析結果確認');
         <input type="hidden" name="ai_generic_name[]" value="<?= h((string)($med['generic_name'] ?? '')) ?>">
         <input type="hidden" name="ai_brand_name[]" value="<?= h((string)($med['brand_name'] ?? '')) ?>">
         <input type="hidden" name="ai_raw_drug_text[]" value="<?= h((string)($med['raw_drug_text'] ?? ($med['drug_name'] ?? ''))) ?>">
+        <input type="hidden" name="ai_usage_text[]" value="<?= h((string)($med['usage_text'] ?? '')) ?>">
+        <input type="hidden" name="ai_days_count[]" value="<?= h((string)($med['days_count'] ?? '')) ?>">
+        <input type="hidden" name="ai_amount_text[]" value="<?= h((string)($med['amount_text'] ?? '')) ?>">
         <button class="btn danger ghost med-delete-button" type="button" data-delete-med>この薬を削除</button>
       </div>
     <?php endforeach; ?>
@@ -171,76 +183,105 @@ View::header('解析結果確認');
       <input type="hidden" name="ai_generic_name[]" value="">
       <input type="hidden" name="ai_brand_name[]" value="">
       <input type="hidden" name="ai_raw_drug_text[]" value="">
+      <input type="hidden" name="ai_usage_text[]" value="">
+      <input type="hidden" name="ai_days_count[]" value="">
+      <input type="hidden" name="ai_amount_text[]" value="">
       <button class="btn danger ghost med-delete-button" type="button" data-delete-med>この薬を削除</button>
     </div>
   </template>
-  <section class="dynamic-field-card">
+  <section class="dynamic-field-card dynamic-field-review-card">
     <div class="dynamic-field-head">
       <div>
-        <h2>読み取り項目の選択</h2>
-        <p>画像内でAIが読み取った項目をすべて表示します。QRや後続出力に使う項目だけチェックを入れてください。未チェックでも確認画面上では残るため、不要項目の判断履歴として補助学習DBに反映されます。</p>
+        <h2>AI読み取り項目の確認・追加</h2>
+        <p>画像内でAIが拾った項目を全て残します。ここでは使う/使わないは選ばず、値の修正と不足項目の追加だけを行います。使用項目の選択は次の画面で行います。</p>
       </div>
       <div class="field-actions">
-        <button class="btn ghost small" type="button" data-field-check="all">全選択</button>
-        <button class="btn ghost small" type="button" data-field-check="none">全解除</button>
+        <button class="btn ghost small" type="button" data-add-dynamic-field>項目を追加</button>
       </div>
     </div>
 
     <?php if (!$dynamicFields): ?>
-      <div class="alert warning">AIが動的項目を返していません。固定項目だけを保存します。プロンプトまたはOpenAI応答を確認してください。</div>
-    <?php else: ?>
-      <div class="dynamic-field-grid">
-        <?php $currentGroup = null; ?>
-        <?php foreach ($dynamicFields as $i => $field): ?>
-          <?php
-            $group = (string)($field['field_group'] ?? 'other');
-            if (!isset($fieldGroupLabels[$group])) { $group = 'other'; }
-            $key = (string)($field['field_key'] ?? ('field_' . $i));
-            $label = (string)($field['field_label'] ?? $key);
-            $value = (string)($field['value'] ?? '');
-            $confidence = is_numeric($field['confidence'] ?? null) ? (float)$field['confidence'] : null;
-            $includeDefault = array_key_exists($key, $fieldPreferences) ? (bool)$fieldPreferences[$key] : (bool)($field['include_default'] ?? false);
-            if ($currentGroup !== $group):
-              $currentGroup = $group;
-          ?>
-            <h3 class="dynamic-field-group"><?= h($fieldGroupLabels[$group]) ?></h3>
-          <?php endif; ?>
-
-          <div class="dynamic-field-row <?= !empty($field['needs_human_check']) ? 'needs-check' : '' ?>">
-            <label class="field-use-check">
-              <input type="checkbox" name="dynamic_field_selected[<?= $i ?>]" value="1" <?= $includeDefault ? 'checked' : '' ?>>
-              <span>使う</span>
-            </label>
-
-            <div class="field-main">
-              <label>
-                <span class="field-label"><?= h($label) ?></span>
-                <input name="dynamic_field_value[<?= $i ?>]" value="<?= h($value) ?>" placeholder="空欄">
-              </label>
-              <div class="field-meta">
-                <span><?= h((string)($field['source_section'] ?? '')) ?></span>
-                <?php if ($confidence !== null): ?><span>信頼度 <?= h((string)round($confidence, 1)) ?>%</span><?php endif; ?>
-                <?php if (!empty($field['needs_human_check'])): ?><span class="attention">要確認</span><?php endif; ?>
-              </div>
-            </div>
-
-            <input type="hidden" name="dynamic_field_key[<?= $i ?>]" value="<?= h($key) ?>">
-            <input type="hidden" name="dynamic_field_label[<?= $i ?>]" value="<?= h($label) ?>">
-            <input type="hidden" name="dynamic_field_group[<?= $i ?>]" value="<?= h($group) ?>">
-            <input type="hidden" name="dynamic_field_ai_value[<?= $i ?>]" value="<?= h($value) ?>">
-            <input type="hidden" name="dynamic_field_source_section[<?= $i ?>]" value="<?= h((string)($field['source_section'] ?? '')) ?>">
-            <input type="hidden" name="dynamic_field_confidence[<?= $i ?>]" value="<?= h((string)($confidence ?? '')) ?>">
-            <input type="hidden" name="dynamic_field_needs_human_check[<?= $i ?>]" value="<?= !empty($field['needs_human_check']) ? '1' : '0' ?>">
-            <input type="hidden" name="dynamic_field_output_candidate[<?= $i ?>]" value="<?= !empty($field['output_candidate']) ? '1' : '0' ?>">
-          </div>
-        <?php endforeach; ?>
-      </div>
+      <div class="alert warning">AIが動的項目を返していません。必要な項目があれば「項目を追加」から補完してください。</div>
     <?php endif; ?>
+
+    <div class="dynamic-field-grid" data-dynamic-field-list>
+      <?php $currentGroup = null; ?>
+      <?php foreach ($dynamicFields as $i => $field): ?>
+        <?php
+          $group = (string)($field['field_group'] ?? 'other');
+          if (!isset($fieldGroupLabels[$group])) { $group = 'other'; }
+          $key = (string)($field['field_key'] ?? ('field_' . $i));
+          $label = (string)($field['field_label'] ?? $key);
+          $value = (string)($field['value'] ?? '');
+          $confidence = is_numeric($field['confidence'] ?? null) ? (float)$field['confidence'] : null;
+          $includeDefault = array_key_exists($key, $fieldPreferences) ? (bool)$fieldPreferences[$key] : (bool)($field['include_default'] ?? false);
+          if ($currentGroup !== $group):
+            $currentGroup = $group;
+        ?>
+          <h3 class="dynamic-field-group"><?= h($fieldGroupLabels[$group]) ?></h3>
+        <?php endif; ?>
+
+        <div class="dynamic-field-row review-field-row <?= !empty($field['needs_human_check']) ? 'needs-check' : '' ?>">
+          <div class="field-main full">
+            <div class="review-field-grid">
+              <label>
+                <span class="field-label">項目名</span>
+                <input name="original_dynamic_label[]" value="<?= h($label) ?>" placeholder="例: 公費負担者番号">
+              </label>
+              <label>
+                <span class="field-label">分類</span>
+                <select name="original_dynamic_group[]">
+                  <?php foreach ($fieldGroupLabels as $g => $gLabel): ?>
+                    <option value="<?= h($g) ?>" <?= $g === $group ? 'selected' : '' ?>><?= h($gLabel) ?></option>
+                  <?php endforeach; ?>
+                </select>
+              </label>
+              <label class="review-field-value">
+                <span class="field-label">読み取り値・修正値</span>
+                <textarea name="original_dynamic_value[]" rows="2" placeholder="空欄"><?= h($value) ?></textarea>
+              </label>
+            </div>
+            <div class="field-meta">
+              <span>AI読取値: <?= h($value !== '' ? $value : '空欄') ?></span>
+              <?php if (!empty($field['source_section'])): ?><span><?= h((string)$field['source_section']) ?></span><?php endif; ?>
+              <?php if ($confidence !== null): ?><span>信頼度 <?= h((string)round($confidence, 1)) ?>%</span><?php endif; ?>
+              <?php if (!empty($field['needs_human_check'])): ?><span class="attention">要確認</span><?php endif; ?>
+            </div>
+          </div>
+
+          <input type="hidden" name="original_dynamic_key[]" value="<?= h($key) ?>">
+          <input type="hidden" name="original_dynamic_ai_value[]" value="<?= h($value) ?>">
+          <input type="hidden" name="original_dynamic_source_section[]" value="<?= h((string)($field['source_section'] ?? '')) ?>">
+          <input type="hidden" name="original_dynamic_confidence[]" value="<?= h((string)($confidence ?? '')) ?>">
+          <input type="hidden" name="original_dynamic_needs_human_check[]" value="<?= !empty($field['needs_human_check']) ? '1' : '0' ?>">
+          <input type="hidden" name="original_dynamic_include_default[]" value="<?= $includeDefault ? '1' : '0' ?>">
+        </div>
+      <?php endforeach; ?>
+    </div>
+
+    <template id="dynamicFieldRowTemplate">
+      <div class="dynamic-field-row review-field-row manual-added-field">
+        <div class="field-main full">
+          <div class="review-field-grid">
+            <label><span class="field-label">項目名</span><input name="original_dynamic_label[]" value="" placeholder="例: 保険医氏名"></label>
+            <label><span class="field-label">分類</span><select name="original_dynamic_group[]"><?php foreach ($fieldGroupLabels as $g => $gLabel): ?><option value="<?= h($g) ?>"><?= h($gLabel) ?></option><?php endforeach; ?></select></label>
+            <label class="review-field-value"><span class="field-label">追加値</span><textarea name="original_dynamic_value[]" rows="2" placeholder="追加で読み取り・入力した値"></textarea></label>
+          </div>
+          <div class="field-meta"><span>人間追加項目</span><span class="attention">AI未検出</span></div>
+        </div>
+        <input type="hidden" name="original_dynamic_key[]" value="manual_field">
+        <input type="hidden" name="original_dynamic_ai_value[]" value="">
+        <input type="hidden" name="original_dynamic_source_section[]" value="人間追加">
+        <input type="hidden" name="original_dynamic_confidence[]" value="">
+        <input type="hidden" name="original_dynamic_needs_human_check[]" value="1">
+        <input type="hidden" name="original_dynamic_include_default[]" value="0">
+      </div>
+    </template>
   </section>
 
   <div class="button-row end sticky-save-actions">
     <a class="btn ghost" href="<?= h(app_url('/prescription_scan.php')) ?>">再撮影</a>
-    <button class="btn primary" type="submit">選択項目を含めてDB保存</button>
+    <button class="btn primary" type="submit">使用項目の選択へ進む</button>
   </div>
 </form>
 <script>
@@ -255,14 +296,6 @@ View::header('解析結果確認');
   document.addEventListener('click', function (event) {
     var target = event.target;
     if (!(target instanceof HTMLElement)) return;
-
-    var mode = target.getAttribute('data-field-check');
-    if (mode) {
-      document.querySelectorAll('.dynamic-field-row input[type="checkbox"]').forEach(function (checkbox) {
-        checkbox.checked = mode === 'all';
-      });
-      return;
-    }
 
     if (target.hasAttribute('data-delete-med')) {
       var row = target.closest('.ocr-med-row');
@@ -283,6 +316,17 @@ View::header('解析結果確認');
       wrap.innerHTML = html.trim();
       list.appendChild(wrap.firstElementChild);
       renumberMedicationRows();
+      return;
+    }
+
+    if (target.hasAttribute('data-add-dynamic-field')) {
+      var fieldList = document.querySelector('[data-dynamic-field-list]');
+      var fieldTmpl = document.getElementById('dynamicFieldRowTemplate');
+      if (!fieldList || !fieldTmpl) return;
+      var fieldWrap = document.createElement('div');
+      fieldWrap.innerHTML = fieldTmpl.innerHTML.trim();
+      fieldList.appendChild(fieldWrap.firstElementChild);
+      return;
     }
   });
 

@@ -1,15 +1,18 @@
 /* =========================================================
-   処方箋システム 共通CSS
+   処方箋システム 共通CSS / COMMON ONLY
    対象: public_html/shohousen/assets/css/app.css
 
    目的:
    - 全画面共通の色・余白・カード・ボタン・フォーム・一覧表を管理する。
-   - 画面固有CSSは prescription_scan.css など各画面専用CSSに分離する。
+   - 画面固有CSSは prescription_scan.css / prescription_result.css など
+     各画面専用CSSに分離する。
 
    運用ルール:
-   - 共通部品はこのファイルに置く。
-   - 処方箋読込専用、在庫管理専用、管理画面専用のCSSは別ファイルに置く。
+   - 共通部品だけをこのファイルに置く。
+   - 特定画面だけで使うCSSは、このファイルに追加しない。
+   - 処方箋読込専用、解析結果専用、使用項目選択専用、管理画面専用のCSSは別ファイルに置く。
    - クラス名を追加する場合は、必ず「何に使うか」のコメントを付ける。
+   - ファイル名は既存画面との互換性維持のため app.css のままにする。
    ========================================================= */
 
 /* =========================================================
@@ -529,162 +532,3 @@ input[readonly] { background: #f9fbfe; }
   .sticky-save-actions { margin-left: -8px; margin-right: -8px; }
   .sticky-save-actions .btn { width: 100%; }
     }
-
-/* =========================================================
-   Dynamic prescription OCR fields
-   処方箋ごとに変動する読み取り項目の選択UI
-   ========================================================= */
-.dynamic-field-card {
-  margin-top: 24px;
-  padding-top: 20px;
-  border-top: 1px solid var(--line);
-}
-.dynamic-field-head {
-  display: flex;
-  justify-content: space-between;
-  gap: 16px;
-  align-items: flex-start;
-  margin-bottom: 14px;
-}
-.dynamic-field-head h2 {
-  margin: 0 0 6px;
-}
-.dynamic-field-head p {
-  margin: 0;
-  color: var(--muted);
-  line-height: 1.7;
-}
-.field-actions {
-  display: flex;
-  gap: 8px;
-  flex-shrink: 0;
-}
-.btn.small {
-  padding: 8px 10px;
-  font-size: 12px;
-}
-.dynamic-field-grid {
-  display: grid;
-  gap: 10px;
-}
-.dynamic-field-group {
-  margin: 18px 0 4px;
-  padding: 8px 10px;
-  border-radius: 10px;
-  background: #f3f6fa;
-  color: var(--text);
-  font-size: 15px;
-}
-.dynamic-field-row {
-  display: grid;
-  grid-template-columns: 86px minmax(0, 1fr);
-  gap: 12px;
-  align-items: stretch;
-  padding: 12px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #fff;
-}
-.dynamic-field-row.needs-check {
-  border-color: #f2c94c;
-  background: #fffdf3;
-}
-.field-use-check {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: center;
-  min-height: 48px;
-  padding: 8px;
-  border-radius: 10px;
-  background: #f7f9fc;
-  font-weight: 700;
-}
-.field-use-check input {
-  width: 18px;
-  height: 18px;
-}
-.field-main label {
-  display: block;
-}
-.field-label {
-  display: block;
-  margin-bottom: 5px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-.field-main input {
-  width: 100%;
-}
-.field-meta {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 6px;
-}
-.field-meta span {
-  padding: 2px 7px;
-  border-radius: 999px;
-  background: #eef2f7;
-  color: #526071;
-  font-size: 11px;
-}
-.field-meta .attention {
-  background: #fff0d5;
-  color: #8a5a00;
-}
-.saved-fields-table {
-  margin-top: 10px;
-}
-.muted-row {
-  opacity: .58;
-}
-
-@media (max-width: 700px) {
-  .dynamic-field-head {
-    display: block;
-  }
-  .field-actions {
-    margin-top: 10px;
-  }
-  .dynamic-field-row {
-    grid-template-columns: 1fr;
-  }
-  .field-use-check {
-    justify-content: flex-start;
-  }
-}
-
-/* Medication name learning UI */
-.form-help {
-  margin: 4px 0 14px;
-  color: var(--muted);
-  font-size: 13px;
-  line-height: 1.6;
-}
-.edit-med-row textarea {
-  width: 100%;
-  min-height: 44px;
-  resize: vertical;
-}
-.edit-med-row .med-field-main,
-.edit-med-row .med-field-raw {
-  grid-column: span 2;
-}
-.med-delete-button {
-  grid-column: span 2;
-  border-color: #fecaca;
-  color: #b91c1c;
-  background: #fff7f7;
-}
-.med-list-actions {
-  margin: 8px 0 18px;
-}
-@media (max-width: 700px) {
-  .edit-med-row .med-field-main,
-  .edit-med-row .med-field-raw,
-  .med-delete-button {
-    grid-column: span 1;
-  }
-}
