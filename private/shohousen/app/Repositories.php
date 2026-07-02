@@ -358,10 +358,8 @@ function create_prescription_from_post(array $user, array $post): int
             $medStmt->execute($params);
         }
 
-        $drugLearningRows = medication_name_learning_rows_from_post($post);
-        if ($drugLearningRows) {
-            (new PrescriptionKnowledgeService())->saveDrugNameLearningEvents($parseJobId, $tenantId, $prescriptionId, $drugLearningRows);
-        }
+        // 薬品名・一般名・商品名の補助学習は、解析結果修正後に prescription_field_select.php で保存する。
+        // ここでは拠点DBへの処方箋確定保存と、使用項目選択の運用設定保存だけを行う。
         $selectedFields = selected_prescription_fields_from_post($post);
         save_prescription_selected_fields($pdo, $tenantId, $prescriptionId, $parseJobId, $selectedFields);
 

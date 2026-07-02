@@ -275,8 +275,6 @@ final class PrescriptionKnowledgeService
                     ]);
                 }
             }
-
-            $this->saveFieldLearningScores($rows);
         } catch (Throwable) {
             // 補助学習DBへの保存失敗で処方箋確定保存を止めない。
         }
@@ -397,7 +395,7 @@ final class PrescriptionKnowledgeService
      *
      * @param array<int,array<string,mixed>> $rows
      */
-    public function saveDrugNameLearningEvents(?int $parseJobId, int $tenantId, int $prescriptionId, array $rows): void
+    public function saveDrugNameLearningEvents(?int $parseJobId, int $tenantId, ?int $prescriptionId, array $rows): void
     {
         if (!$rows) {
             return;
@@ -496,6 +494,304 @@ final class PrescriptionKnowledgeService
         } catch (Throwable) {
             // 補助学習DBの未反映・一時不調で処方箋確定保存を止めない。
         }
+    }
+
+
+    /**
+     * 結果確認画面で人間が修正を確定した時点のAI値/修正後値を補助学習DBへ保存する。
+     * 使用項目の選択結果とは切り離し、OCR精度改善用の訂正データとして扱う。
+     * 患者名・保険番号など個人性の高い項目は、生値ではなくマスク値/傾向だけ保存する。
+     *
+     * @param array<int,array<string,mixed>> $rows
+     */
+    public function saveConfirmedCorrectionLearning(?int $parseJobId, int $tenantId, array $rows): void
+    {
+        if (!$rows) {
+            return;
+        }
+
+        try {
+            $eventStmt = null;
+            if (Db::tableExists(Db::knowledge(), 'prescription_confirmed_correction_events')) {
+                $eventStmt = Db::knowledge()->prepare('INSERT INTO prescription_confirmed_correction_events
+                    (company_uid, branch_uid, tenant_id, parse_job_id, field_key, field_label, field_group,
+                     source_ai_value, final_value, normalized_ai_value, normalized_final_value, correction_type,
+                     correction_score, confidence, needs_human_check, sample_risk_level, prompt_hint, content_hash, created_at)
+                    VALUES
+                    (:company_uid, :branch_uid, :tenant_id, :parse_job_id, :field_key, :field_label, :field_group,
+                     :source_ai_value, :final_value, :normalized_ai_value, :normalized_final_value, :correction_type,
+                     :correction_score, :confidence, :needs_human_check, :sample_risk_level, :prompt_hint, :content_hash, NOW())
+                    ON DUPLICATE KEY UPDATE
+                        correction_score = VALUES(correction_score),
+                        confidence = VALUES(confidence),
+                        needs_human_check = VALUES(needs_human_check),
+                        prompt_hint = VALUES(prompt_hint)');
+            }
+
+            $scoreStmt = null;
+            if (Db::tableExists(Db::knowledge(), 'prescription_confirmed_correction_scores')) {
+                $scoreStmt = Db::knowledge()->prepare('INSERT INTO prescription_confirmed_correction_scores
+                    (company_uid, branch_uid, field_key, field_label, field_group, sample_risk_level,
+                     observed_count, edited_count, added_count, confirmed_count, empty_count,
+                     score_total, avg_score, last_ai_value_sample, last_final_value_sample, last_correction_type,
+                     prompt_hint, last_seen_at, created_at, updated_at)
+                    VALUES
+                    (:company_uid, :branch_uid, :field_key, :field_label, :field_group, :sample_risk_level,
+                     1, :edited_count, :added_count, :confirmed_count, :empty_count,
+                     :score, :score, :last_ai_value_sample, :last_final_value_sample, :last_correction_type,
+                     :prompt_hint, NOW(), NOW(), NOW())
+                    ON DUPLICATE KEY UPDATE
+                        field_label = VALUES(field_label),
+                        field_group = VALUES(field_group),
+                        sample_risk_level = VALUES(sample_risk_level),
+                        observed_count = observed_count + 1,
+                        edited_count = edited_count + VALUES(edited_count),
+                        added_count = added_count + VALUES(added_count),
+                        confirmed_count = confirmed_count + VALUES(confirmed_count),
+                        empty_count = empty_count + VALUES(empty_count),
+                        score_total = score_total + VALUES(score_total),
+                        avg_score = (score_total + VALUES(score_total)) / GREATEST(observed_count + 1, 1),
+                        last_ai_value_sample = VALUES(last_ai_value_sample),
+                        last_final_value_sample = VALUES(last_final_value_sample),
+                        last_correction_type = VALUES(last_correction_type),
+                        prompt_hint = VALUES(prompt_hint),
+                        last_seen_at = NOW(),
+                        updated_at = NOW()');
+            }
+
+            foreach ($rows as $row) {
+                $fieldKey = $this->normalizeFieldKey((string)($row['field_key'] ?? $row['key'] ?? 'field'));
+                $fieldLabel = trim((string)($row['field_label'] ?? $row['label'] ?? $fieldKey));
+                $fieldGroup = trim((string)($row['field_group'] ?? $row['group'] ?? 'other')) ?: 'other';
+                if (!in_array($fieldGroup, ['patient','insurance','public_expense','prescription','medical_institution','medication','pharmacy','note','qr','other'], true)) {
+                    $fieldGroup = 'other';
+                }
+
+                $aiRaw = trim((string)($row['source_ai_value'] ?? $row['ai_value'] ?? ''));
+                $finalRaw = trim((string)($row['field_value'] ?? $row['value'] ?? ''));
+                if ($aiRaw === '' && $finalRaw === '') {
+                    continue;
+                }
+
+                $normalizedAi = $this->normalizeLearningValue($aiRaw);
+                $normalizedFinal = $this->normalizeLearningValue($finalRaw);
+                $riskLevel = $this->fieldRiskLevel($fieldGroup, $fieldKey, $fieldLabel);
+                $correctionType = $this->correctionType($normalizedAi, $normalizedFinal);
+                $confidence = is_numeric($row['confidence'] ?? null) ? (float)$row['confidence'] : null;
+                $needsHumanCheck = !empty($row['needs_human_check']) || !empty($row['needs']);
+                $score = $this->confirmedCorrectionScore($correctionType, $confidence, $needsHumanCheck, $fieldGroup);
+                $aiSample = $this->learningSample($aiRaw, $riskLevel);
+                $finalSample = $this->learningSample($finalRaw, $riskLevel);
+                $promptHint = $this->correctionPromptHint($fieldLabel, $fieldGroup, $fieldKey, $aiSample, $finalSample, $correctionType, $riskLevel);
+                $contentHash = sha1(current_company_uid() . '|' . current_branch_uid() . '|' . (string)$parseJobId . '|' . $fieldKey . '|' . $normalizedAi . '|' . $normalizedFinal . '|' . $correctionType);
+
+                if ($eventStmt && $this->confirmedCorrectionEventExists($contentHash)) {
+                    continue;
+                }
+
+                if ($eventStmt) {
+                    $eventStmt->execute([
+                        ':company_uid' => current_company_uid(),
+                        ':branch_uid' => current_branch_uid(),
+                        ':tenant_id' => $tenantId,
+                        ':parse_job_id' => $parseJobId,
+                        ':field_key' => $fieldKey,
+                        ':field_label' => mb_substr($fieldLabel !== '' ? $fieldLabel : $fieldKey, 0, 160),
+                        ':field_group' => $fieldGroup,
+                        ':source_ai_value' => $aiSample,
+                        ':final_value' => $finalSample,
+                        ':normalized_ai_value' => mb_substr($normalizedAi, 0, 255),
+                        ':normalized_final_value' => mb_substr($normalizedFinal, 0, 255),
+                        ':correction_type' => $correctionType,
+                        ':correction_score' => $score,
+                        ':confidence' => $confidence,
+                        ':needs_human_check' => $needsHumanCheck ? 1 : 0,
+                        ':sample_risk_level' => $riskLevel,
+                        ':prompt_hint' => $promptHint,
+                        ':content_hash' => $contentHash,
+                    ]);
+                }
+
+                if ($scoreStmt) {
+                    $scoreStmt->execute([
+                        ':company_uid' => current_company_uid(),
+                        ':branch_uid' => current_branch_uid(),
+                        ':field_key' => $fieldKey,
+                        ':field_label' => mb_substr($fieldLabel !== '' ? $fieldLabel : $fieldKey, 0, 160),
+                        ':field_group' => $fieldGroup,
+                        ':sample_risk_level' => $riskLevel,
+                        ':edited_count' => $correctionType === 'edited' ? 1 : 0,
+                        ':added_count' => $correctionType === 'added' ? 1 : 0,
+                        ':confirmed_count' => $correctionType === 'confirmed' ? 1 : 0,
+                        ':empty_count' => $correctionType === 'emptied' ? 1 : 0,
+                        ':score' => $score,
+                        ':last_ai_value_sample' => mb_substr($aiSample, 0, 255),
+                        ':last_final_value_sample' => mb_substr($finalSample, 0, 255),
+                        ':last_correction_type' => $correctionType,
+                        ':prompt_hint' => $promptHint,
+                    ]);
+                }
+
+                // OCR補正ルールに昇格してよい低リスク項目だけ、次回AI解析前の候補として使う。
+                if (in_array($fieldGroup, ['medication','medical_institution'], true) && $normalizedAi !== '' && $normalizedFinal !== '' && $normalizedAi !== $normalizedFinal) {
+                    $this->upsertCorrectionRule($fieldKey, $aiRaw, $finalRaw);
+                }
+            }
+        } catch (Throwable) {
+            // 補助学習DBの保存失敗で確認画面遷移を止めない。
+        }
+    }
+
+    /**
+     * 補助学習DBに蓄積された人間修正傾向をOpenAIの読み取りプロンプトへ渡す短いヒントにする。
+     */
+    public function buildOpenAiLearningHints(int $limit = 18): string
+    {
+        $hints = [];
+        try {
+            if (Db::tableExists(Db::knowledge(), 'prescription_confirmed_correction_scores')) {
+                $stmt = Db::knowledge()->prepare('SELECT field_label, field_group, last_correction_type, prompt_hint, avg_score, edited_count, observed_count
+                    FROM prescription_confirmed_correction_scores
+                    WHERE company_uid = :company_uid
+                      AND branch_uid = :branch_uid
+                      AND prompt_hint IS NOT NULL
+                      AND prompt_hint <> ""
+                    ORDER BY edited_count DESC, avg_score DESC, observed_count DESC, last_seen_at DESC
+                    LIMIT :limit');
+                $stmt->bindValue(':company_uid', current_company_uid());
+                $stmt->bindValue(':branch_uid', current_branch_uid());
+                $stmt->bindValue(':limit', max(1, min(50, $limit)), PDO::PARAM_INT);
+                $stmt->execute();
+                foreach ($stmt->fetchAll() as $row) {
+                    $hints[] = '- ' . (string)$row['prompt_hint'];
+                }
+            }
+
+            if (Db::tableExists(Db::knowledge(), 'drug_name_relation_preferences')) {
+                $stmt = Db::knowledge()->prepare('SELECT generic_name, brand_name, display_drug_name, confirmed_count, edited_count
+                    FROM drug_name_relation_preferences
+                    WHERE company_uid = :company_uid
+                      AND branch_uid = :branch_uid
+                    ORDER BY confirmed_count DESC, edited_count DESC, last_seen_at DESC
+                    LIMIT 8');
+                $stmt->execute([
+                    ':company_uid' => current_company_uid(),
+                    ':branch_uid' => current_branch_uid(),
+                ]);
+                foreach ($stmt->fetchAll() as $row) {
+                    $generic = trim((string)($row['generic_name'] ?? ''));
+                    $brand = trim((string)($row['brand_name'] ?? ''));
+                    $display = trim((string)($row['display_drug_name'] ?? ''));
+                    if ($generic !== '' || $brand !== '' || $display !== '') {
+                        $hints[] = '- 薬品名: 一般名「' . $generic . '」と商品名「' . $brand . '」は、同一処方ブロックでは代表名「' . $display . '」にまとめる候補として扱う。';
+                    }
+                }
+            }
+        } catch (Throwable) {
+            return '';
+        }
+
+        if (!$hints) {
+            return '';
+        }
+        return "\n過去の人間修正から得た補助学習ヒント（自動確定せず、読み取り時の注意として使う）:\n" . implode("\n", array_slice($hints, 0, $limit + 8));
+    }
+
+    private function confirmedCorrectionEventExists(string $contentHash): bool
+    {
+        if (!Db::tableExists(Db::knowledge(), 'prescription_confirmed_correction_events')) {
+            return false;
+        }
+        try {
+            $stmt = Db::knowledge()->prepare('SELECT id FROM prescription_confirmed_correction_events WHERE content_hash = :content_hash LIMIT 1');
+            $stmt->execute([':content_hash' => $contentHash]);
+            return (bool)$stmt->fetchColumn();
+        } catch (Throwable) {
+            return false;
+        }
+    }
+
+    private function normalizeFieldKey(string $key): string
+    {
+        return preg_replace('/[^a-zA-Z0-9_.-]+/', '_', trim($key)) ?: 'field';
+    }
+
+    private function normalizeLearningValue(string $value): string
+    {
+        $value = mb_convert_kana(trim($value), 'asKV', 'UTF-8');
+        $value = preg_replace('/\s+/u', '', $value) ?? $value;
+        return mb_strtolower($value);
+    }
+
+    private function correctionType(string $normalizedAi, string $normalizedFinal): string
+    {
+        if ($normalizedAi === '' && $normalizedFinal !== '') {
+            return 'added';
+        }
+        if ($normalizedAi !== '' && $normalizedFinal === '') {
+            return 'emptied';
+        }
+        if ($normalizedAi === $normalizedFinal) {
+            return 'confirmed';
+        }
+        return 'edited';
+    }
+
+    private function fieldRiskLevel(string $fieldGroup, string $fieldKey, string $fieldLabel): string
+    {
+        $text = $fieldGroup . ' ' . $fieldKey . ' ' . $fieldLabel;
+        foreach (['patient', 'insurance', 'public_expense'] as $group) {
+            if ($fieldGroup === $group) {
+                return 'high';
+            }
+        }
+        foreach (['患者', '氏名', 'フリガナ', '生年月日', '保険者番号', '記号', '番号', '公費'] as $word) {
+            if (str_contains($text, $word)) {
+                return 'high';
+            }
+        }
+        return in_array($fieldGroup, ['medication','medical_institution','prescription'], true) ? 'medium' : 'low';
+    }
+
+    private function learningSample(string $value, string $riskLevel): string
+    {
+        $value = trim($value);
+        if ($value === '') {
+            return '';
+        }
+        if ($riskLevel === 'high') {
+            return '[masked len=' . mb_strlen($value) . ' hash=' . substr(sha1($value), 0, 10) . ']';
+        }
+        return mb_substr($value, 0, 1000);
+    }
+
+    private function confirmedCorrectionScore(string $correctionType, ?float $confidence, bool $needsHumanCheck, string $fieldGroup): float
+    {
+        $score = $confidence !== null ? max(0.0, min(100.0, $confidence)) : 50.0;
+        $score += match ($correctionType) {
+            'edited' => 25.0,
+            'added' => 18.0,
+            'emptied' => -12.0,
+            'confirmed' => 8.0,
+            default => 0.0,
+        };
+        $score += $needsHumanCheck ? 8.0 : 0.0;
+        $score += in_array($fieldGroup, ['medication','medical_institution'], true) ? 8.0 : 0.0;
+        return round(max(0.0, min(100.0, $score)), 2);
+    }
+
+    private function correctionPromptHint(string $fieldLabel, string $fieldGroup, string $fieldKey, string $aiSample, string $finalSample, string $correctionType, string $riskLevel): string
+    {
+        $label = $fieldLabel !== '' ? $fieldLabel : $fieldKey;
+        if ($riskLevel === 'high') {
+            return $label . 'は個人情報のため値を推測せず、桁数・位置・空欄判定を重視する。過去に人間修正が発生しているため要確認。';
+        }
+        return match ($correctionType) {
+            'edited' => $label . 'はAI値「' . $aiSample . '」が人間確認で「' . $finalSample . '」へ修正された傾向がある。類似表記では候補として注意する。',
+            'added' => $label . 'はAIが見落としやすく、人間が「' . $finalSample . '」を追加した実績がある。帳票上の空欄・小さい文字も確認する。',
+            'emptied' => $label . 'はAIが過検出しやすい。値が不明な場合は空欄で返す。',
+            default => $label . 'は人間確認でAI値がそのまま確認された実績がある。',
+        };
     }
 
     private function drugPairKey(string $genericName, string $brandName, string $displayDrugName): string

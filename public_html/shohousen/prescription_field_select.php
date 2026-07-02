@@ -47,9 +47,6 @@ function original_dynamic_fields_from_post(array $post): array
     $confidences = $post['original_dynamic_confidence'] ?? [];
     $needs = $post['original_dynamic_needs_human_check'] ?? [];
     $include = $post['original_dynamic_include_default'] ?? [];
-    $uiTemplates = $post['original_dynamic_ui_template'] ?? [];
-    $displayOrders = $post['original_dynamic_display_order'] ?? [];
-    $isEmptyCells = $post['original_dynamic_is_empty_cell'] ?? [];
     $rows = [];
     foreach ($keys as $i => $key) {
         $label = trim((string)($labels[$i] ?? $key));
@@ -70,9 +67,6 @@ function original_dynamic_fields_from_post(array $post): array
             'confidence' => is_numeric($confidences[$i] ?? null) ? (float)$confidences[$i] : null,
             'needs' => (isset($needs[$i]) && (string)$needs[$i] === '1') || ($aiValue !== '' && $value !== '' && $aiValue !== $value),
             'include_default' => isset($include[$i]) && (string)$include[$i] === '1',
-            'ui_template' => trim((string)($uiTemplates[$i] ?? 'input')) ?: 'input',
-            'display_order' => is_numeric($displayOrders[$i] ?? null) ? (int)$displayOrders[$i] : 9999,
-            'is_empty_cell' => isset($isEmptyCells[$i]) && (string)$isEmptyCells[$i] === '1',
         ];
     }
     return $rows;
@@ -193,12 +187,14 @@ for ($i = 0; $i < $medCount; $i++) {
         }
     }
     $relation = trim((string)($relationTypes[$i] ?? 'unknown'));
-    // 使用項目選択画面には、QR/後続出力に使う候補だけを出す。
-    // 一般名・商品名・薬品名元テキスト・薬品名関係は補助学習用としてhiddenで保存し、ここでは表示しない。
     $rows[] = make_field_row("medication.$n.drug_name", "処方{$n}の薬品名", 'medication', $drug, $aiDrug['value'], '確定データ', null, false, $fieldPreferences, $drug !== '');
+    $rows[] = make_field_row("medication.$n.generic_name", "処方{$n}の一般名候補", 'medication', $generic, trim((string)($aiGenericNames[$i] ?? '')), '確定データ', null, false, $fieldPreferences, $generic !== '');
+    $rows[] = make_field_row("medication.$n.brand_name", "処方{$n}の商品名候補", 'medication', $brand, trim((string)($aiBrandNames[$i] ?? '')), '確定データ', null, false, $fieldPreferences, $brand !== '');
+    $rows[] = make_field_row("medication.$n.raw_drug_text", "処方{$n}の薬品名元テキスト", 'medication', $rawDrug, trim((string)($aiRawDrugTexts[$i] ?? '')), '確定データ', null, false, $fieldPreferences, $rawDrug !== '');
     $rows[] = make_field_row("medication.$n.usage_text", "処方{$n}の用法", 'medication', $usage, $aiUsage['value'], '確定データ', null, false, $fieldPreferences, $usage !== '');
     $rows[] = make_field_row("medication.$n.days_count", "処方{$n}の日数", 'medication', $days, $aiDays['value'], '確定データ', null, false, $fieldPreferences, $days !== '');
     $rows[] = make_field_row("medication.$n.amount_text", "処方{$n}の総量/備考", 'medication', $amount, $aiAmount['value'], '確定データ', null, false, $fieldPreferences, $amount !== '');
+    $rows[] = make_field_row("medication.$n.relation_type", "処方{$n}の薬品名関係", 'medication', $relation, '', '確定データ', null, false, $fieldPreferences, $relation !== '' && $relation !== 'unknown');
 }
 
 $existingKeys = array_fill_keys(array_map(static fn($row) => $row['key'], $rows), true);
@@ -207,12 +203,6 @@ foreach ($originals as $orig) {
         continue;
     }
     $key = normalize_field_key((string)$orig['key']);
-    if (preg_match('/medication[_\.][0-9]+[_\.](generic_name|brand_name|raw_drug_text|relation_type)$/', $key)) {
-        continue;
-    }
-    if (str_contains($key, 'raw_drug_text') || str_contains($key, 'generic_name') || str_contains($key, 'brand_name') || str_contains($key, 'relation_type')) {
-        continue;
-    }
     if (isset($existingKeys[$key])) {
         continue;
     }
@@ -242,17 +232,51 @@ usort($rows, static function (array $a, array $b) use ($groupOrder): int {
     $ga = $ga === false ? 999 : $ga;
     $gb = $gb === false ? 999 : $gb;
     if ($ga === $gb) {
-        return (((int)($a['display_order'] ?? 9999)) <=> ((int)($b['display_order'] ?? 9999))) ?: strcmp((string)$a['label'], (string)$b['label']);
+        return strcmp((string)$a['label'], (string)$b['label']);
     }
     return $ga <=> $gb;
 });
+
+$parseJobIdForLearning = (int)select_string($post, 'parse_job_id');
+$parseJobIdForLearning = $parseJobIdForLearning > 0 ? $parseJobIdForLearning : null;
+$learningSaved = false;
+try {
+    $learningRows = array_map(static function (array $row): array {
+        return [
+            'field_key' => $row['key'],
+            'field_label' => $row['label'],
+            'field_group' => $row['group'],
+            'source_ai_value' => $row['ai_value'],
+            'field_value' => $row['value'],
+            'confidence' => $row['confidence'],
+            'needs_human_check' => $row['needs'],
+        ];
+    }, $rows);
+    $knowledgeService->saveConfirmedCorrectionLearning($parseJobIdForLearning, (int)$user['tenant_id'], $learningRows);
+
+    $drugLearningRows = function_exists('medication_name_learning_rows_from_post')
+        ? medication_name_learning_rows_from_post($post)
+        : [];
+    if ($drugLearningRows) {
+        $knowledgeService->saveDrugNameLearningEvents($parseJobIdForLearning, (int)$user['tenant_id'], null, $drugLearningRows);
+    }
+    $learningSaved = true;
+} catch (Throwable) {
+    $learningSaved = false;
+}
 
 View::header('使用項目の選択', ['styles' => ['/assets/css/prescription_field_select.css']]);
 ?>
 <section class="page-title">
   <h1>使用項目の選択</h1>
-  <p>前画面で修正した確定データをもとに、DB保存・QR作成・補助学習に使う項目を選択します。AI値と修正後の値を比較できます。</p>
+  <p>前画面で確定した修正内容は補助学習DBへ保存済みです。この画面では、拠点運用としてDB保存・QR作成に使う項目だけを選択します。</p>
 </section>
+
+<?php if ($learningSaved): ?>
+  <div class="alert success"><strong>補助学習データ保存済み</strong><br>AI読み取り値と人間修正後の差分を、OCR精度改善用の補助学習DBへ保存しました。この画面の使う/使わないは拠点ごとの運用選択です。</div>
+<?php else: ?>
+  <div class="alert warning"><strong>補助学習データの保存確認ができませんでした</strong><br>画面操作は続行できます。補助学習DBのmigrationまたは接続状態を確認してください。</div>
+<?php endif; ?>
 
 <form class="card result-card" method="post" action="<?= h(app_url('/prescription_save.php')) ?>">
   <?= Csrf::field() ?>
@@ -310,7 +334,7 @@ View::header('使用項目の選択', ['styles' => ['/assets/css/prescription_fi
     <div class="dynamic-field-head">
       <div>
         <h2>保存・出力に使う項目</h2>
-        <p>「修正後の値」が保存・QR用の候補になります。「AI値」は補助学習用の比較元です。</p>
+        <p>「修正後の値」が保存・QR用の候補です。AI値との比較は前画面確定時点で補助学習DBへ保存済みです。</p>
       </div>
       <div class="field-actions">
         <button class="btn ghost small" type="button" data-field-check="all">全選択</button>

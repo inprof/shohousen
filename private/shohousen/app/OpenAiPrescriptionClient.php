@@ -18,7 +18,13 @@ final class OpenAiPrescriptionClient
         }
 
         $schema = self::responseSchema();
-        $prompt = self::systemPrompt($templateHint);
+        $learningHints = '';
+        try {
+            $learningHints = (new PrescriptionKnowledgeService())->buildOpenAiLearningHints();
+        } catch (Throwable) {
+            $learningHints = '';
+        }
+        $prompt = self::systemPrompt($templateHint, $learningHints);
         $base64 = base64_encode((string)file_get_contents($imagePath));
         $detail = (string)app_config('openai.vision_detail', 'high');
 
@@ -121,7 +127,7 @@ final class OpenAiPrescriptionClient
         throw new RuntimeException('OpenAI APIレスポンスから出力テキストを取得できません。');
     }
 
-    private static function systemPrompt(?array $templateHint): string
+    private static function systemPrompt(?array $templateHint, string $learningHints = ''): string
     {
         $template = '';
         if ($templateHint) {
@@ -132,17 +138,17 @@ final class OpenAiPrescriptionClient
 医療情報のため、不明点は推測で埋めず、空欄・null・needs_human_check=trueで返してください。
 患者情報、保険情報、医療機関情報、処方薬情報を抽出します。
 処方箋の様式は医療機関・拠点ごとに異なるため、固定テンプレートだけに寄せず、画像内に見える項目名と値をできる限り form_fields に列挙してください。
-form_fields には、空欄でも帳票上に存在する主要項目を入れてください。枠だけ存在して値が空欄の項目も is_empty_cell=true, value="" として残してください。例: 公費負担者番号、公費負担医療の受給者番号、保険者番号、被保険者証の記号番号、患者氏名、フリガナ、生年月日、性別、区分、交付年月日、処方箋使用期間、医療機関所在地、医療機関名、電話番号、保険医氏名、都道府県番号、点数表番号、医療機関コード、備考、保険医署名、薬品名、用量、用法、日数、QR有無など。
-画面側では field_group, value_type, ui_template を見て、事前に用意した入力枠テンプレートへ配置します。画像内に見える項目は、固定項目に入らなくても form_fields に残してください。display_order は帳票上で上から下・左から右の順で付けてください。
+form_fields には、空欄でも帳票上に存在する主要項目を入れてください。例: 公費負担者番号、公費負担医療の受給者番号、保険者番号、被保険者証の記号番号、患者氏名、フリガナ、生年月日、性別、区分、交付年月日、処方箋使用期間、医療機関所在地、医療機関名、電話番号、保険医氏名、都道府県番号、点数表番号、医療機関コード、備考、保険医署名、薬品名、用量、用法、日数、QR有無など。
+画面側では field_group と value_type を見て、事前に用意した入力枠テンプレートへ配置します。画像内に見える項目は、固定項目に入らなくても form_fields に残してください。
 出力に使うかどうかは人間が後で選択するため、include_default は「通常出力に使いそうな項目」だけ true にし、それ以外も form_fields には残してください。
 出力は必ず指定JSON Schemaに従い、余計な文章を含めないでください。
 数字、日付、薬品名、用法、日数は特に慎重に扱ってください。
 薬品名や用法が読みにくい場合はneeds_human_check=trueにしてください。
 薬品名については、一般名・商品名・販売名・後発品名・先発品名・屋号違いをできるだけ区別してください。
-同じ処方ブロック内に商品名と一般名が併記されている場合は、別薬として分けず、原則1つのmedications要素にまとめてください。サーバー側では一般名処方マスタ由来の候補も補助的に照合しますが、画像解析時点では帳票上の文字列を優先してください。
+同じ処方ブロック内に商品名と一般名が併記されている場合は、別薬として分けず、原則1つのmedications要素にまとめてください。
 その場合、drug_nameには薬局で表示・保存したい代表名、generic_nameには一般名候補、brand_nameには商品名候補、raw_drug_textには画像内で読めた薬品名行を改行区切りで入れてください。
 同一薬か別薬か判断できない場合は、分けてもよいですが name_relation="multiple_candidates" とし、needs_human_check=trueにしてください。
-{$template}
+{$template}{$learningHints}
 PROMPT;
     }
 
@@ -162,10 +168,7 @@ PROMPT;
                 'needs_human_check',
                 'include_default',
                 'output_candidate',
-                'reason',
-                'ui_template',
-                'display_order',
-                'is_empty_cell'
+                'reason'
             ],
             'properties' => [
                 'field_key' => ['type' => 'string', 'description' => 'snake_case。分からない場合は項目名から生成。例: patient_name, public_expense_beneficiary_number'],
@@ -173,9 +176,6 @@ PROMPT;
                 'field_group' => ['type' => 'string', 'enum' => ['patient', 'insurance', 'public_expense', 'prescription', 'medical_institution', 'medication', 'pharmacy', 'note', 'qr', 'other']],
                 'value' => ['type' => 'string', 'description' => '読み取った値。空欄なら空文字。'],
                 'value_type' => ['type' => 'string', 'enum' => ['text', 'date', 'number', 'code', 'person_name', 'drug', 'usage', 'amount', 'boolean', 'unknown']],
-                'ui_template' => ['type' => 'string', 'enum' => ['input', 'textarea', 'date', 'number', 'select', 'checkbox', 'drug_line', 'blank_cell', 'unknown'], 'description' => '画面表示用の入力枠テンプレート。空欄枠ならblank_cell。'],
-                'display_order' => ['type' => 'integer', 'description' => '帳票上の表示順。上から下、左から右の順。'],
-                'is_empty_cell' => ['type' => 'boolean', 'description' => '帳票上に枠はあるが値が空欄ならtrue。'],
                 'source_section' => ['type' => 'string', 'description' => '帳票上のおおまかな場所。例: 上部左、上部右、処方欄、下部QR'],
                 'confidence' => ['type' => 'number'],
                 'needs_human_check' => ['type' => 'boolean'],
@@ -307,9 +307,9 @@ PROMPT;
 【般】アンブロキソール塩酸塩錠15mg", 'name_relation' => 'generic_brand_pair', 'dose_text' => '1錠', 'usage_text' => '1日3回 毎食後', 'days_count' => 28, 'amount_text' => '28日分', 'confidence' => 87.0, 'needs_human_check' => true, 'reason' => 'demo'],
             ],
             'form_fields' => [
-                ['field_key' => 'patient_name', 'field_label' => '氏名', 'field_group' => 'patient', 'value' => '山田 花子', 'value_type' => 'person_name', 'source_section' => '患者欄', 'confidence' => 94.2, 'needs_human_check' => true, 'include_default' => true, 'output_candidate' => true, 'ui_template' => 'input', 'display_order' => 10, 'is_empty_cell' => false, 'reason' => 'demo'],
-                ['field_key' => 'insurance_no', 'field_label' => '保険者番号', 'field_group' => 'insurance', 'value' => '12345678', 'value_type' => 'code', 'source_section' => '保険欄', 'confidence' => 90.0, 'needs_human_check' => true, 'include_default' => true, 'output_candidate' => true, 'ui_template' => 'input', 'display_order' => 20, 'is_empty_cell' => false, 'reason' => 'demo'],
-                ['field_key' => 'medical_institution_name', 'field_label' => '保険医療機関の名称', 'field_group' => 'medical_institution', 'value' => 'さくらクリニック', 'value_type' => 'text', 'source_section' => '医療機関欄', 'confidence' => 86.0, 'needs_human_check' => true, 'include_default' => true, 'output_candidate' => true, 'ui_template' => 'input', 'display_order' => 30, 'is_empty_cell' => false, 'reason' => 'demo'],
+                ['field_key' => 'patient_name', 'field_label' => '氏名', 'field_group' => 'patient', 'value' => '山田 花子', 'value_type' => 'person_name', 'source_section' => '患者欄', 'confidence' => 94.2, 'needs_human_check' => true, 'include_default' => true, 'output_candidate' => true, 'reason' => 'demo'],
+                ['field_key' => 'insurance_no', 'field_label' => '保険者番号', 'field_group' => 'insurance', 'value' => '12345678', 'value_type' => 'code', 'source_section' => '保険欄', 'confidence' => 90.0, 'needs_human_check' => true, 'include_default' => true, 'output_candidate' => true, 'reason' => 'demo'],
+                ['field_key' => 'medical_institution_name', 'field_label' => '保険医療機関の名称', 'field_group' => 'medical_institution', 'value' => 'さくらクリニック', 'value_type' => 'text', 'source_section' => '医療機関欄', 'confidence' => 86.0, 'needs_human_check' => true, 'include_default' => true, 'output_candidate' => true, 'reason' => 'demo'],
             ],
             'warnings' => ['demo data'],
             'overall_confidence' => 91.2,
@@ -336,7 +336,7 @@ PROMPT;
                 $rawDrugText = implode("
 ", array_values(array_filter([$drugName, $genericName, $brandName], static fn($v) => trim((string)$v) !== '')));
             }
-            $row = [
+            $out[] = [
                 'drug_name' => $drugName,
                 'generic_name' => $genericName,
                 'brand_name' => $brandName,
@@ -350,10 +350,6 @@ PROMPT;
                 'needs_human_check' => (bool)($med['needs_human_check'] ?? true),
                 'reason' => (string)($med['reason'] ?? ''),
             ];
-            if (class_exists('DrugNameMasterService')) {
-                $row = DrugNameMasterService::enrichMedication($row);
-            }
-            $out[] = $row;
         }
         return $out;
     }
@@ -430,7 +426,7 @@ PROMPT;
 
         usort($out, static function (array $a, array $b): int {
             $groupOrder = ['patient' => 10, 'insurance' => 20, 'public_expense' => 30, 'prescription' => 40, 'medical_institution' => 50, 'medication' => 60, 'pharmacy' => 70, 'note' => 80, 'qr' => 90, 'other' => 99];
-            return (($groupOrder[$a['field_group']] ?? 99) <=> ($groupOrder[$b['field_group']] ?? 99)) ?: (((int)($a['display_order'] ?? 9999)) <=> ((int)($b['display_order'] ?? 9999)));
+            return ($groupOrder[$a['field_group']] ?? 99) <=> ($groupOrder[$b['field_group']] ?? 99);
         });
 
         return $out;
@@ -447,16 +443,6 @@ PROMPT;
         if (!in_array($valueType, ['text', 'date', 'number', 'code', 'person_name', 'drug', 'usage', 'amount', 'boolean', 'unknown'], true)) {
             $valueType = 'unknown';
         }
-        $uiTemplate = (string)($field['ui_template'] ?? 'input');
-        if (!in_array($uiTemplate, ['input', 'textarea', 'date', 'number', 'select', 'checkbox', 'drug_line', 'blank_cell', 'unknown'], true)) {
-            $uiTemplate = match ($valueType) {
-                'date' => 'date',
-                'number' => 'number',
-                'boolean' => 'checkbox',
-                'drug', 'usage', 'amount' => 'input',
-                default => 'input',
-            };
-        }
         $key = trim((string)($field['field_key'] ?? ''));
         $label = trim((string)($field['field_label'] ?? ''));
         if ($key === '') {
@@ -471,9 +457,6 @@ PROMPT;
             'field_group' => $group,
             'value' => (string)($field['value'] ?? ''),
             'value_type' => $valueType,
-            'ui_template' => $uiTemplate,
-            'display_order' => is_numeric($field['display_order'] ?? null) ? (int)$field['display_order'] : 9999,
-            'is_empty_cell' => (bool)($field['is_empty_cell'] ?? (trim((string)($field['value'] ?? '')) === '')),
             'source_section' => mb_substr((string)($field['source_section'] ?? ''), 0, 160),
             'confidence' => is_numeric($field['confidence'] ?? null) ? (float)$field['confidence'] : 0.0,
             'needs_human_check' => (bool)($field['needs_human_check'] ?? true),
