@@ -19,6 +19,22 @@ jobs:
       - name: Checkout latest main
         uses: actions/checkout@v4
 
+      - name: Generate deploy info
+        run: |
+          mkdir -p ./public_html/shohousen
+          cat > ./public_html/shohousen/deploy_info.json <<EOF
+          {
+            "repository": "${GITHUB_REPOSITORY}",
+            "branch": "${GITHUB_REF_NAME}",
+            "commit": "${GITHUB_SHA}",
+            "commit_short": "${GITHUB_SHA::7}",
+            "actor": "${GITHUB_ACTOR}",
+            "run_id": "${GITHUB_RUN_ID}",
+            "run_url": "https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}",
+            "deployed_at": "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+          }
+          EOF
+
       - name: Upload public_html files
         uses: SamKirkland/FTP-Deploy-Action@v4.4.0
         with:
@@ -29,7 +45,7 @@ jobs:
           port: 21
           local-dir: ./public_html/shohousen/
           server-dir: ${{ secrets.XSERVER_PUBLIC_DIR }}
-          state-name: .ftp-deploy-sync-state-public.json
+          state-name: .ftp-deploy-sync-state-public-v4.json
           exclude: |
             **/.git*
             **/.git*/**
@@ -59,7 +75,7 @@ jobs:
           port: 21
           local-dir: ./private/shohousen/
           server-dir: ${{ secrets.XSERVER_PRIVATE_DIR }}
-          state-name: .ftp-deploy-sync-state-private-v3.json
+          state-name: .ftp-deploy-sync-state-private-v4.json
           exclude: |
             **/.git*
             **/.git*/**
@@ -87,6 +103,7 @@ jobs:
         env:
           CHATWORK_API_TOKEN: ${{ secrets.CHATWORK_DEPLOY_API_TOKEN || secrets.CHATWORK_API_TOKEN }}
           CHATWORK_ROOM_ID: ${{ secrets.CHATWORK_DEPLOY_ROOM_ID || secrets.CHATWORK_ROOM_ID }}
+          DEPLOY_INFO_URL: ${{ secrets.XSERVER_DEPLOY_INFO_URL }}
           PUBLIC_RESULT: ${{ needs.deploy-public.result }}
           PRIVATE_RESULT: ${{ needs.deploy-private.result }}
           COMMIT_SHA: ${{ github.sha }}
@@ -102,24 +119,42 @@ jobs:
 
           SHORT_SHA="${COMMIT_SHA:0:7}"
           MESSAGE_TEXT="${COMMIT_MESSAGE:-manual run}"
+          VERIFY_RESULT="未実施"
+          VERIFY_DETAIL="XSERVER_DEPLOY_INFO_URL 未設定"
+          OVERALL_STATUS="成功"
+          TITLE="【GitHub】Xserver自動アップロード完了"
 
-          if [ "$PUBLIC_RESULT" = "success" ] && [ "$PRIVATE_RESULT" = "success" ]; then
-            TITLE="【GitHub】Xserver自動アップロード完了"
-            STATUS="成功"
-          else
+          if [ -n "$DEPLOY_INFO_URL" ]; then
+            VERIFY_BODY="$(curl -fsSL "${DEPLOY_INFO_URL}?v=${COMMIT_SHA}" || true)"
+            if echo "$VERIFY_BODY" | grep -q "$COMMIT_SHA"; then
+              VERIFY_RESULT="成功"
+              VERIFY_DETAIL="Web上の deploy_info.json が今回commitと一致"
+            else
+              VERIFY_RESULT="失敗"
+              VERIFY_DETAIL="FTPは完了扱いだが、Web上の deploy_info.json が今回commitと一致しません"
+            fi
+          fi
+
+          if [ "$PUBLIC_RESULT" != "success" ] || [ "$PRIVATE_RESULT" != "success" ]; then
+            OVERALL_STATUS="失敗"
             TITLE="【GitHub】Xserver自動アップロード失敗"
-            STATUS="失敗"
+          elif [ "$VERIFY_RESULT" = "失敗" ]; then
+            OVERALL_STATUS="FTP成功・Web反映確認失敗"
+            TITLE="【GitHub】Xserver反映確認に失敗"
           fi
 
           MESSAGE="[info][title]${TITLE}[/title]
           種別: main差分FTPアップロード
           リポジトリ: ${REPOSITORY}
           実行者: ${ACTOR}
-          結果: ${STATUS}
+          結果: ${OVERALL_STATUS}
           public_html: ${PUBLIC_RESULT}
           private: ${PRIVATE_RESULT}
+          Web反映確認: ${VERIFY_RESULT}
+          詳細: ${VERIFY_DETAIL}
           commit: ${SHORT_SHA}
           message: ${MESSAGE_TEXT}
+          deploy_info: ${DEPLOY_INFO_URL:-未設定}
           Actions: ${RUN_URL}
           [/info]"
 
@@ -127,3 +162,7 @@ jobs:
             -H "x-chatworktoken: ${CHATWORK_API_TOKEN}" \
             --data-urlencode "body=${MESSAGE}" \
             "https://api.chatwork.com/v2/rooms/${CHATWORK_ROOM_ID}/messages"
+
+          if [ "$VERIFY_RESULT" = "失敗" ]; then
+            exit 1
+          fi

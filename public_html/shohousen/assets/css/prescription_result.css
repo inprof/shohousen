@@ -316,3 +316,11 @@
     letter-spacing: .25em;
   }
 }
+
+
+/* 動的読み取り項目から処方薬欄へ同期された直後の一時ハイライト */
+.synced-from-dynamic {
+  outline: 2px solid rgba(15, 102, 208, .35);
+  background: #f0f7ff;
+  transition: background .25s, outline .25s;
+}

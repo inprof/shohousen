@@ -10,7 +10,7 @@ final class View
         echo '<!doctype html><html lang="ja"><head><meta charset="utf-8">';
         echo '<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">';
         echo '<title>' . h($title) . ' | ' . h(app_config('app.name', 'PharmaAssist')) . '</title>';
-        echo '<link rel="stylesheet" href="' . h(app_url('/assets/css/app.css')) . '">';
+        echo '<link rel="stylesheet" href="' . h(app_asset_url('/assets/css/app.css')) . '">';
         $styles = $options['styles'] ?? [];
         if (is_string($styles)) {
             $styles = [$styles];
@@ -21,7 +21,7 @@ final class View
                 if ($stylePath === '') {
                     continue;
                 }
-                echo '<link rel="stylesheet" href="' . h(app_url($stylePath)) . '">';
+                echo '<link rel="stylesheet" href="' . h(app_asset_url($stylePath)) . '">';
             }
         }
         echo '</head><body class="' . h($bodyClass) . '">';
@@ -37,6 +37,10 @@ final class View
 
     public static function footer(): void
     {
-        echo '</main><script src="' . h(app_url('/assets/js/app.js')) . '"></script></body></html>';
+        $deployInfo = app_deploy_info();
+        $version = app_version();
+        $deployedAt = (string)($deployInfo['deployed_at'] ?? '');
+        echo '<div class="deploy-version" title="deployed: ' . h($deployedAt) . '">ver ' . h(substr($version, 0, 7)) . '</div>';
+        echo '</main><script src="' . h(app_asset_url('/assets/js/app.js')) . '"></script></body></html>';
     }
 }

@@ -532,3 +532,21 @@ input[readonly] { background: #f9fbfe; }
   .sticky-save-actions { margin-left: -8px; margin-right: -8px; }
   .sticky-save-actions .btn { width: 100%; }
     }
+
+
+/* .deploy-version: GitHub ActionsでSV反映済みcommitを画面右下に薄く表示する共通確認バッジ。 */
+.deploy-version {
+  position: fixed;
+  right: 8px;
+  bottom: 4px;
+  z-index: 9999;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(15, 23, 42, .55);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1;
+  pointer-events: none;
+  opacity: .55;
+}
+@media print { .deploy-version { display: none; } }
