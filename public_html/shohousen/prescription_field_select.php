@@ -47,6 +47,9 @@ function original_dynamic_fields_from_post(array $post): array
     $confidences = $post['original_dynamic_confidence'] ?? [];
     $needs = $post['original_dynamic_needs_human_check'] ?? [];
     $include = $post['original_dynamic_include_default'] ?? [];
+    $uiTemplates = $post['original_dynamic_ui_template'] ?? [];
+    $displayOrders = $post['original_dynamic_display_order'] ?? [];
+    $isEmptyCells = $post['original_dynamic_is_empty_cell'] ?? [];
     $rows = [];
     foreach ($keys as $i => $key) {
         $label = trim((string)($labels[$i] ?? $key));
@@ -67,6 +70,9 @@ function original_dynamic_fields_from_post(array $post): array
             'confidence' => is_numeric($confidences[$i] ?? null) ? (float)$confidences[$i] : null,
             'needs' => (isset($needs[$i]) && (string)$needs[$i] === '1') || ($aiValue !== '' && $value !== '' && $aiValue !== $value),
             'include_default' => isset($include[$i]) && (string)$include[$i] === '1',
+            'ui_template' => trim((string)($uiTemplates[$i] ?? 'input')) ?: 'input',
+            'display_order' => is_numeric($displayOrders[$i] ?? null) ? (int)$displayOrders[$i] : 9999,
+            'is_empty_cell' => isset($isEmptyCells[$i]) && (string)$isEmptyCells[$i] === '1',
         ];
     }
     return $rows;
@@ -187,14 +193,12 @@ for ($i = 0; $i < $medCount; $i++) {
         }
     }
     $relation = trim((string)($relationTypes[$i] ?? 'unknown'));
+    // 使用項目選択画面には、QR/後続出力に使う候補だけを出す。
+    // 一般名・商品名・薬品名元テキスト・薬品名関係は補助学習用としてhiddenで保存し、ここでは表示しない。
     $rows[] = make_field_row("medication.$n.drug_name", "処方{$n}の薬品名", 'medication', $drug, $aiDrug['value'], '確定データ', null, false, $fieldPreferences, $drug !== '');
-    $rows[] = make_field_row("medication.$n.generic_name", "処方{$n}の一般名候補", 'medication', $generic, trim((string)($aiGenericNames[$i] ?? '')), '確定データ', null, false, $fieldPreferences, $generic !== '');
-    $rows[] = make_field_row("medication.$n.brand_name", "処方{$n}の商品名候補", 'medication', $brand, trim((string)($aiBrandNames[$i] ?? '')), '確定データ', null, false, $fieldPreferences, $brand !== '');
-    $rows[] = make_field_row("medication.$n.raw_drug_text", "処方{$n}の薬品名元テキスト", 'medication', $rawDrug, trim((string)($aiRawDrugTexts[$i] ?? '')), '確定データ', null, false, $fieldPreferences, $rawDrug !== '');
     $rows[] = make_field_row("medication.$n.usage_text", "処方{$n}の用法", 'medication', $usage, $aiUsage['value'], '確定データ', null, false, $fieldPreferences, $usage !== '');
     $rows[] = make_field_row("medication.$n.days_count", "処方{$n}の日数", 'medication', $days, $aiDays['value'], '確定データ', null, false, $fieldPreferences, $days !== '');
     $rows[] = make_field_row("medication.$n.amount_text", "処方{$n}の総量/備考", 'medication', $amount, $aiAmount['value'], '確定データ', null, false, $fieldPreferences, $amount !== '');
-    $rows[] = make_field_row("medication.$n.relation_type", "処方{$n}の薬品名関係", 'medication', $relation, '', '確定データ', null, false, $fieldPreferences, $relation !== '' && $relation !== 'unknown');
 }
 
 $existingKeys = array_fill_keys(array_map(static fn($row) => $row['key'], $rows), true);
@@ -203,6 +207,12 @@ foreach ($originals as $orig) {
         continue;
     }
     $key = normalize_field_key((string)$orig['key']);
+    if (preg_match('/medication[_\.][0-9]+[_\.](generic_name|brand_name|raw_drug_text|relation_type)$/', $key)) {
+        continue;
+    }
+    if (str_contains($key, 'raw_drug_text') || str_contains($key, 'generic_name') || str_contains($key, 'brand_name') || str_contains($key, 'relation_type')) {
+        continue;
+    }
     if (isset($existingKeys[$key])) {
         continue;
     }
@@ -232,7 +242,7 @@ usort($rows, static function (array $a, array $b) use ($groupOrder): int {
     $ga = $ga === false ? 999 : $ga;
     $gb = $gb === false ? 999 : $gb;
     if ($ga === $gb) {
-        return strcmp((string)$a['label'], (string)$b['label']);
+        return (((int)($a['display_order'] ?? 9999)) <=> ((int)($b['display_order'] ?? 9999))) ?: strcmp((string)$a['label'], (string)$b['label']);
     }
     return $ga <=> $gb;
 });

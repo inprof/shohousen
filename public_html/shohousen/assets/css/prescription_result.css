@@ -196,3 +196,45 @@
     grid-template-columns: 1fr;
   }
 }
+
+/* 補助学習用の薬品名元テキストは通常の修正項目とは分けて折りたたむ */
+.med-learning-details {
+  grid-column: span 2;
+  border: 1px dashed var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #fbfdff;
+}
+.med-learning-details summary {
+  cursor: pointer;
+  font-weight: 700;
+  color: var(--muted);
+}
+.med-learning-details .med-field-raw {
+  display: block;
+  margin-top: 10px;
+}
+.generic-master-hints {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.generic-master-hints strong {
+  width: 100%;
+  color: var(--muted);
+  font-size: 12px;
+}
+.generic-master-hints span {
+  display: inline-block;
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: #eef6ff;
+  color: #1d4ed8;
+  font-size: 12px;
+}
+@media (max-width: 700px) {
+  .med-learning-details {
+    grid-column: span 1;
+  }
+}

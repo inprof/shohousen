@@ -40,6 +40,32 @@ $fieldGroupLabels = [
     'qr' => 'QR・コード',
     'other' => 'その他',
 ];
+
+function render_dynamic_value_control(string $name, string $value, string $uiTemplate, string $valueType): string
+{
+    $uiTemplate = in_array($uiTemplate, ['input','textarea','date','number','select','checkbox','drug_line','blank_cell','unknown'], true) ? $uiTemplate : 'input';
+    $valueType = in_array($valueType, ['text','date','number','code','person_name','drug','usage','amount','boolean','unknown'], true) ? $valueType : 'text';
+    $escapedName = h($name);
+    $escapedValue = h($value);
+    if ($uiTemplate === 'textarea' || $uiTemplate === 'drug_line' || str_contains($value, "\n")) {
+        return '<textarea name="' . $escapedName . '" rows="2" placeholder="空欄">' . $escapedValue . '</textarea>';
+    }
+    if ($uiTemplate === 'checkbox' || $valueType === 'boolean') {
+        $yesSelected = in_array($value, ['1', 'true', '有', 'あり', 'はい', '○', '✓'], true) ? ' selected' : '';
+        $noSelected = in_array($value, ['0', 'false', '無', 'なし', 'いいえ', '×'], true) ? ' selected' : '';
+        return '<select name="' . $escapedName . '"><option value="">空欄</option><option value="有"' . $yesSelected . '>有</option><option value="無"' . $noSelected . '>無</option></select>';
+    }
+    if ($uiTemplate === 'date' || $valueType === 'date') {
+        $type = preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) ? 'date' : 'text';
+        return '<input type="' . $type . '" name="' . $escapedName . '" value="' . $escapedValue . '" placeholder="年/月/日">';
+    }
+    if ($uiTemplate === 'number' || $valueType === 'number') {
+        return '<input type="text" inputmode="numeric" name="' . $escapedName . '" value="' . $escapedValue . '" placeholder="空欄">';
+    }
+    $placeholder = $uiTemplate === 'blank_cell' ? '空欄枠' : '空欄';
+    return '<input name="' . $escapedName . '" value="' . $escapedValue . '" placeholder="' . h($placeholder) . '">';
+}
+
 $fieldGroupOrder = array_keys($fieldGroupLabels);
 usort($dynamicFields, static function (array $a, array $b) use ($fieldGroupOrder): int {
     $ga = array_search((string)($a['field_group'] ?? 'other'), $fieldGroupOrder, true);
@@ -47,7 +73,7 @@ usort($dynamicFields, static function (array $a, array $b) use ($fieldGroupOrder
     $ga = $ga === false ? 999 : $ga;
     $gb = $gb === false ? 999 : $gb;
     if ($ga === $gb) {
-        return strcmp((string)($a['field_label'] ?? ''), (string)($b['field_label'] ?? ''));
+        return (((int)($a['display_order'] ?? 9999)) <=> ((int)($b['display_order'] ?? 9999))) ?: strcmp((string)($a['field_label'] ?? ''), (string)($b['field_label'] ?? ''));
     }
     return $ga <=> $gb;
 });
@@ -132,11 +158,22 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
         </label>
         <label>一般名候補<input name="generic_name[]" value="<?= h((string)($med['generic_name'] ?? '')) ?>" placeholder="例: アンブロキソール塩酸塩"></label>
         <label>商品名候補<input name="brand_name[]" value="<?= h((string)($med['brand_name'] ?? '')) ?>" placeholder="例: ムコソルバン錠"></label>
-        <label class="med-field-raw">薬品名元テキスト
-          <textarea name="raw_drug_text[]" rows="3" placeholder="AIが読んだ薬品名行。一般名・商品名を改行で残せます。
+        <details class="med-learning-details">
+          <summary>補助学習用の薬品名元テキストを確認</summary>
+          <label class="med-field-raw">薬品名元テキスト
+            <textarea name="raw_drug_text[]" rows="3" placeholder="AIが読んだ薬品名行。一般名・商品名を改行で残せます。
 例: ムコソルバン錠15mg
 【般】アンブロキソール塩酸塩錠15mg"><?= h((string)($med['raw_drug_text'] ?? ($med['drug_name'] ?? ''))) ?></textarea>
-        </label>
+          </label>
+          <?php if (!empty($med['_generic_master_candidates'])): ?>
+            <div class="generic-master-hints">
+              <strong>一般名処方マスタ候補</strong>
+              <?php foreach ((array)$med['_generic_master_candidates'] as $candidate): ?>
+                <span><?= h((string)($candidate['generic_prescription_name'] ?? '')) ?><?= !empty($candidate['ingredient_name']) ? ' / ' . h((string)$candidate['ingredient_name']) : '' ?></span>
+              <?php endforeach; ?>
+            </div>
+          <?php endif; ?>
+        </details>
         <label>用法<input name="usage_text[]" value="<?= h((string)($med['usage_text'] ?? '')) ?>"></label>
         <label>日数<input type="number" name="days_count[]" value="<?= h((string)($med['days_count'] ?? '')) ?>"></label>
         <label>総量/備考<input name="amount_text[]" value="<?= h((string)($med['amount_text'] ?? '')) ?>"></label>
@@ -173,7 +210,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       <label class="med-field-main">薬品名（代表名）<textarea name="drug_name[]" rows="2" placeholder="保存する代表薬品名"></textarea></label>
       <label>一般名候補<input name="generic_name[]" value="" placeholder="一般名候補"></label>
       <label>商品名候補<input name="brand_name[]" value="" placeholder="商品名候補"></label>
-      <label class="med-field-raw">薬品名元テキスト<textarea name="raw_drug_text[]" rows="3" placeholder="AI読み取り行や追加入力を残します"></textarea></label>
+      <details class="med-learning-details"><summary>補助学習用の薬品名元テキストを確認</summary><label class="med-field-raw">薬品名元テキスト<textarea name="raw_drug_text[]" rows="3" placeholder="AI読み取り行や追加入力を残します"></textarea></label></details>
       <label>用法<input name="usage_text[]" value=""></label>
       <label>日数<input type="number" name="days_count[]" value=""></label>
       <label>総量/備考<input name="amount_text[]" value=""></label>
@@ -192,8 +229,8 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   <section class="dynamic-field-card dynamic-field-review-card">
     <div class="dynamic-field-head">
       <div>
-        <h2>AI読み取り項目の確認・追加</h2>
-        <p>画像内でAIが拾った項目を全て残します。ここでは使う/使わないは選ばず、値の修正と不足項目の追加だけを行います。使用項目の選択は次の画面で行います。</p>
+        <h2>帳票内のその他読み取り項目</h2>
+        <p>固定枠に入らない項目や空欄枠も残します。ここでは使う/使わないは選ばず、値の修正と不足項目の追加だけを行います。</p>
       </div>
       <div class="field-actions">
         <button class="btn ghost small" type="button" data-add-dynamic-field>項目を追加</button>
@@ -238,7 +275,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
               </label>
               <label class="review-field-value">
                 <span class="field-label">読み取り値・修正値</span>
-                <textarea name="original_dynamic_value[]" rows="2" placeholder="空欄"><?= h($value) ?></textarea>
+                <?= render_dynamic_value_control('original_dynamic_value[]', $value, (string)($field['ui_template'] ?? 'input'), (string)($field['value_type'] ?? 'text')) ?>
               </label>
             </div>
             <div class="field-meta">
@@ -255,6 +292,9 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
           <input type="hidden" name="original_dynamic_confidence[]" value="<?= h((string)($confidence ?? '')) ?>">
           <input type="hidden" name="original_dynamic_needs_human_check[]" value="<?= !empty($field['needs_human_check']) ? '1' : '0' ?>">
           <input type="hidden" name="original_dynamic_include_default[]" value="<?= $includeDefault ? '1' : '0' ?>">
+          <input type="hidden" name="original_dynamic_ui_template[]" value="<?= h((string)($field['ui_template'] ?? 'input')) ?>">
+          <input type="hidden" name="original_dynamic_display_order[]" value="<?= h((string)($field['display_order'] ?? (string)($i + 1))) ?>">
+          <input type="hidden" name="original_dynamic_is_empty_cell[]" value="<?= !empty($field['is_empty_cell']) ? '1' : '0' ?>">
         </div>
       <?php endforeach; ?>
     </div>
@@ -275,6 +315,9 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
         <input type="hidden" name="original_dynamic_confidence[]" value="">
         <input type="hidden" name="original_dynamic_needs_human_check[]" value="1">
         <input type="hidden" name="original_dynamic_include_default[]" value="0">
+        <input type="hidden" name="original_dynamic_ui_template[]" value="input">
+        <input type="hidden" name="original_dynamic_display_order[]" value="9999">
+        <input type="hidden" name="original_dynamic_is_empty_cell[]" value="0">
       </div>
     </template>
   </section>
