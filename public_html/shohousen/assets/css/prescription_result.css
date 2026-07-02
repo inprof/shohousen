@@ -324,3 +324,60 @@
   background: #f0f7ff;
   transition: background .25s, outline .25s;
 }
+
+
+/* 分類ごとの項目追加UI */
+.dynamic-add-controls {
+  align-items: center;
+}
+.field-add-target {
+  display: flex;
+  align-items: center;
+  margin: 0;
+}
+.field-add-target select {
+  min-width: 150px;
+  height: 36px;
+  padding: 6px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+}
+.dynamic-field-group-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 18px 0 4px;
+  padding: 0;
+}
+.dynamic-field-group-row .dynamic-field-group {
+  flex: 1;
+  margin: 0;
+}
+.dynamic-field-group-row .btn.small {
+  white-space: nowrap;
+}
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+@media (max-width: 760px) {
+  .dynamic-add-controls,
+  .dynamic-field-group-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .field-add-target select,
+  .dynamic-add-controls .btn,
+  .dynamic-field-group-row .btn {
+    width: 100%;
+  }
+}

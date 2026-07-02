@@ -129,18 +129,6 @@ function upsert_review_field(array &$rows, array $field): void
     $rows[$key]['display_order'] = min((int)$rows[$key]['display_order'], (int)$row['display_order']);
 }
 
-
-function is_learning_only_review_field(string $key, string $label): bool
-{
-    $text = mb_strtolower($key . ' ' . $label);
-    foreach (['raw_drug_text', '薬品名元テキスト', '元テキスト', 'generic_name', '一般名候補', 'brand_name', '商品名候補', 'relation_type', '薬品名の関係', 'drug_name_relation', 'name_relation'] as $needle) {
-        if (str_contains($text, mb_strtolower($needle))) {
-            return true;
-        }
-    }
-    return false;
-}
-
 function render_dynamic_value_control(string $name, string $value, string $uiTemplate, string $valueType, string $fieldKey): string
 {
     $uiTemplate = in_array($uiTemplate, ['input','textarea','date','number','select','checkbox','drug_line','blank_cell','unknown'], true) ? $uiTemplate : 'input';
@@ -202,11 +190,6 @@ foreach ($fixedDefinitions as [$key, $label, $group, $value, $valueType, $uiTemp
 }
 foreach ($dynamicFields as $i => $field) {
     if (!is_array($field)) {
-        continue;
-    }
-    $fieldKeyForFilter = (string)($field['field_key'] ?? '');
-    $fieldLabelForFilter = (string)($field['field_label'] ?? '');
-    if (is_learning_only_review_field($fieldKeyForFilter, $fieldLabelForFilter)) {
         continue;
     }
     $field['display_order'] = $field['display_order'] ?? (1000 + $i);
@@ -282,8 +265,16 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
         <h2>AI読み取り項目の修正</h2>
         <p>帳票上にある項目を一覧で修正します。固定テンプレートにない項目や空欄枠も、必要ならここで追加してください。</p>
       </div>
-      <div class="field-actions">
-        <button class="btn ghost small" type="button" data-add-dynamic-field>項目を追加</button>
+      <div class="field-actions dynamic-add-controls">
+        <label class="field-add-target">
+          <span class="sr-only">追加先分類</span>
+          <select data-add-dynamic-group>
+            <?php foreach ($fieldGroupLabels as $g => $gLabel): ?>
+              <option value="<?= h($g) ?>"><?= h($gLabel) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <button class="btn ghost small" type="button" data-add-dynamic-field data-use-selected-group="1">選択した分類に項目を追加</button>
       </div>
     </div>
 
@@ -306,10 +297,13 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
           if ($currentGroup !== $group):
             $currentGroup = $group;
         ?>
-          <h3 class="dynamic-field-group"><?= h($fieldGroupLabels[$group]) ?></h3>
+          <div class="dynamic-field-group-row" data-group-header="<?= h($group) ?>">
+            <h3 class="dynamic-field-group"><?= h($fieldGroupLabels[$group]) ?></h3>
+            <button class="btn ghost small" type="button" data-add-dynamic-field data-group="<?= h($group) ?>"><?= h($fieldGroupLabels[$group]) ?>に追加</button>
+          </div>
         <?php endif; ?>
 
-        <div class="dynamic-field-row review-field-row <?= !empty($field['needs_human_check']) ? 'needs-check' : '' ?>">
+        <div class="dynamic-field-row review-field-row <?= !empty($field['needs_human_check']) ? 'needs-check' : '' ?>" data-field-group="<?= h($group) ?>">
           <div class="field-main full">
             <div class="review-field-grid">
               <label>
@@ -325,12 +319,12 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
                 </select>
               </label>
               <label class="review-field-value">
-                <span class="field-label">読み取り値・修正値</span>
+                <span class="field-label">修正後の値</span>
                 <?= render_dynamic_value_control('original_dynamic_value[]', $value, (string)($field['ui_template'] ?? 'input'), (string)($field['value_type'] ?? 'text'), $key) ?>
               </label>
             </div>
             <div class="field-meta">
-              <span>AI読取値: <?= h($aiValue !== '' ? $aiValue : '空欄') ?></span>
+              <span>AI読取値（自動保持）: <?= h($aiValue !== '' ? $aiValue : '空欄') ?></span>
               <?php if (!empty($field['source_section'])): ?><span><?= h((string)$field['source_section']) ?></span><?php endif; ?>
               <?php if ($confidence !== null): ?><span>信頼度 <?= h((string)round($confidence, 1)) ?>%</span><?php endif; ?>
               <?php if (!empty($field['needs_human_check'])): ?><span class="attention">要確認</span><?php endif; ?>
@@ -351,12 +345,12 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     </div>
 
     <template id="dynamicFieldRowTemplate">
-      <div class="dynamic-field-row review-field-row manual-added-field">
+      <div class="dynamic-field-row review-field-row manual-added-field" data-field-group="other">
         <div class="field-main full">
           <div class="review-field-grid">
             <label><span class="field-label">項目名</span><input name="original_dynamic_label[]" value="" placeholder="例: 保険医氏名"></label>
-            <label><span class="field-label">分類</span><select name="original_dynamic_group[]"><?php foreach ($fieldGroupLabels as $g => $gLabel): ?><option value="<?= h($g) ?>"><?= h($gLabel) ?></option><?php endforeach; ?></select></label>
-            <label class="review-field-value"><span class="field-label">追加値</span><textarea name="original_dynamic_value[]" rows="2" placeholder="追加で読み取り・入力した値" data-review-value data-field-key="manual_field"></textarea></label>
+            <label><span class="field-label">分類</span><select name="original_dynamic_group[]" data-manual-group-select><?php foreach ($fieldGroupLabels as $g => $gLabel): ?><option value="<?= h($g) ?>"><?= h($gLabel) ?></option><?php endforeach; ?></select></label>
+            <label class="review-field-value"><span class="field-label">修正後の値</span><textarea name="original_dynamic_value[]" rows="2" placeholder="追加で読み取り・入力した値" data-review-value data-field-key="manual_field"></textarea></label>
           </div>
           <div class="field-meta"><span>人間追加項目</span><span class="attention">AI未検出</span></div>
         </div>
@@ -497,6 +491,8 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
 </form>
 <script>
 (function () {
+  var FIELD_GROUP_LABELS = <?= json_encode($fieldGroupLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+
   function renumberMedicationRows() {
     document.querySelectorAll('[data-med-list] .ocr-med-row').forEach(function (row, index) {
       var no = row.querySelector('.row-no');
@@ -504,10 +500,184 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     });
   }
 
+  function normalizeTextForDetect(value) {
+    return String(value || '').replace(/\s+/g, '').toLowerCase();
+  }
+
+  function uniqueManualFieldKey(group) {
+    return 'manual.' + String(group || 'other').replace(/[^a-zA-Z0-9_.-]+/g, '_') + '.' + Date.now() + '.' + Math.floor(Math.random() * 10000);
+  }
+
+  function ensureGroupHeader(group) {
+    var fieldList = document.querySelector('[data-dynamic-field-list]');
+    if (!fieldList) return null;
+    var existing = fieldList.querySelector('[data-group-header="' + group + '"]');
+    if (existing) return existing;
+
+    var row = document.createElement('div');
+    row.className = 'dynamic-field-group-row';
+    row.setAttribute('data-group-header', group);
+
+    var title = document.createElement('h3');
+    title.className = 'dynamic-field-group';
+    title.textContent = FIELD_GROUP_LABELS[group] || FIELD_GROUP_LABELS.other || 'その他AI項目';
+
+    var button = document.createElement('button');
+    button.className = 'btn ghost small';
+    button.type = 'button';
+    button.setAttribute('data-add-dynamic-field', '');
+    button.setAttribute('data-group', group);
+    button.textContent = title.textContent + 'に追加';
+
+    row.appendChild(title);
+    row.appendChild(button);
+    fieldList.appendChild(row);
+    return row;
+  }
+
+  function insertFieldRowIntoGroup(row, group) {
+    var fieldList = document.querySelector('[data-dynamic-field-list]');
+    if (!fieldList || !row) return;
+    var header = ensureGroupHeader(group);
+    row.setAttribute('data-field-group', group);
+
+    var select = row.querySelector('[name="original_dynamic_group[]"]');
+    if (select) select.value = group;
+
+    var keyInput = row.querySelector('[name="original_dynamic_key[]"]');
+    if (keyInput && (!keyInput.value || keyInput.value === 'manual_field' || keyInput.value.indexOf('manual.') === 0)) {
+      keyInput.value = uniqueManualFieldKey(group);
+    }
+    row.querySelectorAll('[data-review-value]').forEach(function (control) {
+      if (keyInput) control.setAttribute('data-field-key', keyInput.value);
+    });
+
+    var source = row.querySelector('[name="original_dynamic_source_section[]"]');
+    if (source) source.value = '人間追加:' + (FIELD_GROUP_LABELS[group] || group);
+
+    var lastInGroup = null;
+    fieldList.querySelectorAll('[data-field-group="' + group + '"]').forEach(function (candidate) {
+      if (candidate !== row) lastInGroup = candidate;
+    });
+
+    if (lastInGroup) {
+      lastInGroup.after(row);
+    } else if (header) {
+      header.after(row);
+    } else {
+      fieldList.appendChild(row);
+    }
+  }
+
+  function addDynamicFieldToGroup(group) {
+    var tmpl = document.getElementById('dynamicFieldRowTemplate');
+    if (!tmpl) return;
+    var wrap = document.createElement('div');
+    wrap.innerHTML = tmpl.innerHTML.trim();
+    var row = wrap.firstElementChild;
+    insertFieldRowIntoGroup(row, group || 'other');
+    var labelInput = row.querySelector('[name="original_dynamic_label[]"]');
+    if (labelInput) labelInput.focus();
+  }
+
+  function detectMedicationIndex(row) {
+    var label = row.querySelector('[name="original_dynamic_label[]"]')?.value || '';
+    var key = row.querySelector('[name="original_dynamic_key[]"]')?.value || '';
+    var text = label + ' ' + key;
+    var m = text.match(/(?:処方|薬|薬品|medication|med|drug)[^0-9０-９]*(\d+|[０-９]+)/i);
+    if (!m) return 0;
+    var num = String(m[1]).replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
+    var index = parseInt(num, 10);
+    return Number.isFinite(index) && index > 0 ? index - 1 : 0;
+  }
+
+  function detectMedicationTarget(row) {
+    var label = row.querySelector('[name="original_dynamic_label[]"]')?.value || '';
+    var key = row.querySelector('[name="original_dynamic_key[]"]')?.value || '';
+    var group = row.querySelector('[name="original_dynamic_group[]"]')?.value || '';
+    var text = normalizeTextForDetect(label + ' ' + key);
+
+    if (group !== 'medication' && !/(処方|薬品|薬剤|医薬品|用法|用量|日数|総量|数量|備考|drug|medication|usage|days|amount|qty|quantity)/i.test(text)) {
+      return '';
+    }
+    if (/(一般名|generic)/i.test(text)) return 'generic_name[]';
+    if (/(商品名|brand)/i.test(text)) return 'brand_name[]';
+    if (/(用法|服用|使用法|usage)/i.test(text)) return 'usage_text[]';
+    if (/(日数|日分|days|duration)/i.test(text)) return 'days_count[]';
+    if (/(総量|数量|用量|備考|amount|qty|quantity)/i.test(text)) return 'amount_text[]';
+    if (/(薬品名|薬剤名|医薬品名|薬名|drugname|drug_name|medication)/i.test(text)) return 'drug_name[]';
+    return '';
+  }
+
+  function ensureMedicationRow(index) {
+    var list = document.querySelector('[data-med-list]');
+    var tmpl = document.getElementById('medicationRowTemplate');
+    if (!list) return null;
+    while (list.querySelectorAll('.ocr-med-row').length <= index) {
+      if (!tmpl) break;
+      var html = tmpl.innerHTML.replace(/__NO__/g, String(list.querySelectorAll('.ocr-med-row').length + 1));
+      var wrap = document.createElement('div');
+      wrap.innerHTML = html.trim();
+      list.appendChild(wrap.firstElementChild);
+    }
+    renumberMedicationRows();
+    return list.querySelectorAll('.ocr-med-row')[index] || null;
+  }
+
+  function syncMedicationFromDynamicControl(control) {
+    var row = control.closest('.review-field-row');
+    if (!row) return;
+    var targetName = detectMedicationTarget(row);
+    if (!targetName) return;
+    var index = detectMedicationIndex(row);
+    var medRow = ensureMedicationRow(index);
+    if (!medRow) return;
+    var target = medRow.querySelector('[name="' + targetName + '"]');
+    if (!target) return;
+    target.value = control.value || '';
+    target.classList.add('synced-from-dynamic');
+    setTimeout(function () { target.classList.remove('synced-from-dynamic'); }, 700);
+  }
+
+  function findReviewValueByExactKey(key) {
+    return document.querySelector('[data-review-value][data-field-key="' + key + '"]');
+  }
+
+  function findReviewValueByLabel(group, patterns) {
+    var matched = null;
+    document.querySelectorAll('.review-field-row').forEach(function (row) {
+      if (matched) return;
+      var rowGroup = row.querySelector('[name="original_dynamic_group[]"]')?.value || row.getAttribute('data-field-group') || '';
+      if (group && rowGroup !== group) return;
+      var label = row.querySelector('[name="original_dynamic_label[]"]')?.value || '';
+      var key = row.querySelector('[name="original_dynamic_key[]"]')?.value || '';
+      var text = label + ' ' + key;
+      var ok = patterns.some(function (pattern) { return pattern.test(text); });
+      if (!ok) return;
+      matched = row.querySelector('[data-review-value]');
+    });
+    return matched;
+  }
+
+  function fixedFieldFallbackControl(key) {
+    switch (key) {
+      case 'patient.name': return findReviewValueByLabel('patient', [/氏名/, /患者名/, /name/i]);
+      case 'patient.gender': return findReviewValueByLabel('patient', [/性別/, /男|女/, /gender/i]);
+      case 'patient.birth_date': return findReviewValueByLabel('patient', [/生年月日/, /birth/i]);
+      case 'insurance.insurance_no': return findReviewValueByLabel('insurance', [/保険者番号/, /insurance.*no/i]);
+      case 'insurance.insured_symbol_number': return findReviewValueByLabel('insurance', [/記号/, /番号/, /被保険者/]);
+      case 'insurance.copay_rate': return findReviewValueByLabel('insurance', [/負担割合/, /負担/]);
+      case 'prescription.issued_on': return findReviewValueByLabel('prescription', [/交付年月日/, /発行日/, /issued/i]);
+      case 'medical_institution.code': return findReviewValueByLabel('medical_institution', [/医療機関コード/, /コード/]);
+      case 'medical_institution.name': return findReviewValueByLabel('medical_institution', [/医療機関名/, /医療機関.*名称/, /所在.*名称/]);
+      default: return null;
+    }
+  }
+
   function syncFixedHiddenFields() {
     document.querySelectorAll('[data-fixed-field]').forEach(function (hidden) {
       var key = hidden.getAttribute('data-fixed-field');
-      var control = document.querySelector('[data-review-value][data-field-key="' + key + '"]');
+      var control = findReviewValueByExactKey(key) || fixedFieldFallbackControl(key);
       if (control) hidden.value = control.value || '';
     });
   }
@@ -546,11 +716,21 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
 
   document.addEventListener('input', function (event) {
     if (event.target instanceof HTMLElement && event.target.closest('.result-card')) {
+      if (event.target.matches('[data-review-value]')) {
+        syncMedicationFromDynamicControl(event.target);
+      }
       syncPreview();
     }
   });
   document.addEventListener('change', function (event) {
+    if (event.target instanceof HTMLElement && event.target.matches('[data-manual-group-select]')) {
+      var row = event.target.closest('.manual-added-field');
+      if (row) insertFieldRowIntoGroup(row, event.target.value || 'other');
+    }
     if (event.target instanceof HTMLElement && event.target.closest('.result-card')) {
+      if (event.target.matches('[data-review-value]')) {
+        syncMedicationFromDynamicControl(event.target);
+      }
       syncPreview();
     }
   });
@@ -573,6 +753,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       row.querySelectorAll('select').forEach(function (select) { select.value = 'unknown'; });
       row.remove();
       renumberMedicationRows();
+      syncPreview();
       return;
     }
 
@@ -585,16 +766,18 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       wrap.innerHTML = html.trim();
       list.appendChild(wrap.firstElementChild);
       renumberMedicationRows();
+      syncPreview();
       return;
     }
 
     if (target.hasAttribute('data-add-dynamic-field')) {
-      var fieldList = document.querySelector('[data-dynamic-field-list]');
-      var fieldTmpl = document.getElementById('dynamicFieldRowTemplate');
-      if (!fieldList || !fieldTmpl) return;
-      var fieldWrap = document.createElement('div');
-      fieldWrap.innerHTML = fieldTmpl.innerHTML.trim();
-      fieldList.appendChild(fieldWrap.firstElementChild);
+      var group = target.getAttribute('data-group');
+      if (!group && target.getAttribute('data-use-selected-group') === '1') {
+        var groupSelect = document.querySelector('[data-add-dynamic-group]');
+        group = groupSelect ? groupSelect.value : 'other';
+      }
+      addDynamicFieldToGroup(group || 'other');
+      syncPreview();
       return;
     }
   });
