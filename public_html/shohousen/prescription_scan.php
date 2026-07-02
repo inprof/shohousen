@@ -3,6 +3,7 @@ require_once dirname(__DIR__, 2) . '/private/shohousen/app/bootstrap.php';
 $user = Auth::requireBranchSelected();
 View::header('処方箋読込');
 ?>
+<link rel="stylesheet" href="<?= h(app_url('/assets/css/prescription_scan.css')) ?>">
 <section class="page-title with-back">
   <a class="back-link" href="<?= h(app_url('/menu.php')) ?>">←</a>
   <div><h1>処方箋読込</h1><p>スマホ/iPadで処方箋を撮影し、OpenAI APIで解析します。確定前に必ず人間確認を行います。</p></div>
@@ -20,14 +21,17 @@ View::header('処方箋読込');
         <li>暗い場所、斜め撮影、ピンぼけは解析精度が落ちます。</li>
         <li>AI解析後、人間確認・修正してからQR化します。</li>
       </ul>
-      <label class="btn primary camera-picker">
-        カメラで撮影する
-        <input type="file" name="prescription_file" id="prescriptionFile" accept="image/jpeg,image/png,image/webp" capture="environment" required>
-      </label>
-      <label class="btn ghost camera-picker secondary-picker">
-        ファイルから選択する
-        <input type="file" id="prescriptionFilePicker" accept="image/jpeg,image/png,image/webp">
-      </label>
+      <div class="capture-actions" aria-label="処方箋画像の取り込み方法">
+        <input class="native-hidden-file-input" type="file" name="prescription_file" id="prescriptionFile" accept="image/*" capture="environment" required>
+        <input class="native-hidden-file-input" type="file" id="prescriptionFilePicker" accept="image/jpeg,image/png,image/webp,image/*">
+        <button class="btn primary capture-action-button" type="button" id="openCameraButton">
+          カメラを起動して撮影
+        </button>
+        <button class="btn ghost capture-action-button" type="button" id="openFilePickerButton">
+          保存済み画像から選択
+        </button>
+      </div>
+      <p class="hint left">スマホ/iPadでは「カメラを起動して撮影」から撮影してください。PCなどカメラ撮影に非対応の環境ではファイル選択になる場合があります。</p>
       <p class="hint left">対応：JPG / PNG / WEBP。PDFは画像化して取り込んでください。</p>
     </section>
 

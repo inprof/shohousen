@@ -3,11 +3,13 @@
 (() => {
   const cameraInput = document.getElementById('prescriptionFile');
   const pickerInput = document.getElementById('prescriptionFilePicker');
+  const openCameraButton = document.getElementById('openCameraButton');
+  const openFilePickerButton = document.getElementById('openFilePickerButton');
   const preview = document.getElementById('scanPreview');
   const quality = document.getElementById('scanQuality');
   const button = document.getElementById('analyzeButton');
   const sourceType = document.getElementById('sourceType');
-  if (!cameraInput || !pickerInput || !preview || !quality || !button || !sourceType) return;
+  if (!cameraInput || !pickerInput || !openCameraButton || !openFilePickerButton || !preview || !quality || !button || !sourceType) return;
 
   const MAX_LONG_SIDE = 2200;
   const JPEG_QUALITY = 0.84;
@@ -117,6 +119,16 @@
       button.disabled = true;
     }
   };
+
+  openCameraButton.addEventListener('click', () => {
+    sourceType.value = 'camera';
+    cameraInput.click();
+  });
+
+  openFilePickerButton.addEventListener('click', () => {
+    sourceType.value = 'file';
+    pickerInput.click();
+  });
 
   cameraInput.addEventListener('change', () => showFile(cameraInput.files && cameraInput.files[0], 'camera'));
   pickerInput.addEventListener('change', () => showFile(pickerInput.files && pickerInput.files[0], 'file'));

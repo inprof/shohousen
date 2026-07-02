@@ -1,0 +1,69 @@
+/* =========================================================
+   処方箋読込画面専用CSS
+   対象: public_html/shohousen/prescription_scan.php
+
+   目的:
+   - カメラ起動/保存済み画像選択/撮影画像プレビューの見た目だけを管理する。
+   - 全画面共通の色・ボタン・カードは app.css を利用する。
+   ========================================================= */
+
+/* .scan-upload: 処方箋読込フォーム全体のカード余白。 */
+.scan-upload { padding: 22px; }
+
+/* .scan-layout: 撮影ガイドとプレビューを2カラムで並べる。 */
+.scan-layout { display: grid; grid-template-columns: .9fr 1.1fr; gap: 22px; align-items: stretch; }
+
+/* .scan-guide: 撮影ガイドと取り込みボタンを縦に並べる。 */
+.scan-guide { display: grid; gap: 14px; align-content: start; }
+
+/* .scan-guide ul: 撮影時の注意書き。 */
+.scan-guide ul { margin: 0; padding-left: 1.2em; color: var(--muted); line-height: 1.8; }
+
+/* .capture-actions: カメラ起動/保存済み画像選択ボタンの外枠。 */
+.capture-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+
+/* .native-hidden-file-input: ネイティブの「ファイルを選択」ボタンを画面に直接出さない。 */
+.native-hidden-file-input { display: none !important; }
+
+/* .capture-action-button: 撮影/選択ボタンの最低幅。 */
+.capture-action-button { min-width: 190px; }
+
+/* .scan-preview-panel: プレビュー枠と品質表示を縦に並べる。 */
+.scan-preview-panel { display: grid; gap: 10px; }
+
+/* .scan-frame: 撮影画像プレビュー枠。大きすぎる画像を画面内に収める。 */
+.scan-frame {
+  min-height: 360px;
+  max-height: min(430px, 48vh);
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border: 2px dashed var(--line-strong);
+  border-radius: 16px;
+  background: #f8fbff;
+  color: var(--muted);
+  text-align: center;
+}
+
+/* .scan-frame img: 撮影画像を縦横比維持でプレビュー枠に収める。 */
+.scan-frame img {
+  width: 100%;
+  height: 100%;
+  max-width: 100%;
+  max-height: min(430px, 48vh);
+  object-fit: contain;
+  display: block;
+}
+
+/* .scan-quality: 画像サイズ/縮小状況/注意点の表示。 */
+.scan-quality { padding: 12px; border-radius: 10px; background: #eef6ff; color: #28507d; font-size: 13px; line-height: 1.6; }
+
+/* .hint.left: 読込画面では補足文を左寄せにする。 */
+.hint.left { text-align: left; }
+
+@media (max-width: 760px) {
+  .scan-layout { grid-template-columns: 1fr; }
+  .capture-action-button { width: 100%; }
+  .scan-frame { min-height: 180px; max-height: 32vh; }
+  .scan-frame img { max-height: 32vh; }
+}

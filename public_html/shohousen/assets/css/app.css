@@ -4,11 +4,11 @@
 
    目的:
    - 全画面共通の色・余白・カード・ボタン・フォーム・一覧表を管理する。
-   - 画面固有CSSはまだ分離していないため、現時点ではこの app.css が全画面共通CSS。
+   - 画面固有CSSは prescription_scan.css など各画面専用CSSに分離する。
 
    運用ルール:
    - 共通部品はこのファイルに置く。
-   - 処方箋読込専用、在庫管理専用、管理画面専用のCSSが増えたら別ファイル化する。
+   - 処方箋読込専用、在庫管理専用、管理画面専用のCSSは別ファイルに置く。
    - クラス名を追加する場合は、必ず「何に使うか」のコメントを付ける。
    ========================================================= */
 
@@ -265,30 +265,7 @@ input[readonly] { background: #f9fbfe; }
 .bottom-actions { display: flex; justify-content: center; gap: 22px; margin-top: 22px; padding: 14px; color: var(--muted); font-size: 14px; }
 
 /* =========================================================
-   09. 処方箋読込画面
-   使用画面: prescription_scan.php
-   ========================================================= */
-
-/* .scan-grid: カメラ起動カードとファイル選択カードを2カラムで並べる外枠。 */
-.scan-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
-
-/* .scan-card: 処方箋読込の選択カード。カメラ/ファイル選択の大きい操作ボタン。 */
-.scan-card { min-height: 230px; display: grid; place-items: center; align-content: center; gap: 12px; padding: 28px; border: 1px solid var(--line); border-radius: 14px; background: linear-gradient(180deg, #f7fbff, #fff); color: var(--text); cursor: pointer; text-align: center; font: inherit; }
-
-/* .scan-card em: 読込カード内の補足文。 */
-.scan-card em { color: var(--muted); font-style: normal; font-size: 13px; }
-
-/* .scan-icon: 読込カード内の大きなアイコン枠。 */
-.scan-icon { display: grid; place-items: center; width: 76px; height: 76px; border-radius: 18px; background: #e9f3ff; color: var(--primary); font-size: 42px; }
-
-/* .file-card input[type="file"]: ファイル選択カード内のファイル入力欄。横幅を制限する。 */
-.file-card input[type="file"] { max-width: 280px; }
-
-/* .hint: 処方箋読込画面下部の注意文。グリッド全幅で中央表示する。 */
-.hint { grid-column: 1 / -1; text-align: center; color: var(--muted); }
-
-/* =========================================================
-   10. 解析結果確認・処方箋詳細カード
+   09. 解析結果確認・処方箋詳細カード
    使用画面: prescription_result.php / reception_detail.php
    ========================================================= */
 
@@ -439,8 +416,8 @@ input[readonly] { background: #f9fbfe; }
   /* .header-nav: タブレット以下でヘッダーナビを小さく詰める。 */
   .header-nav { gap: 10px; font-size: 12px; }
 
-  /* .hero, .top-grid, .info-columns, .scan-grid: タブレット以下では1カラムに落とす。 */
-  .hero, .top-grid, .info-columns, .scan-grid { grid-template-columns: 1fr; }
+  /* .hero, .top-grid, .info-columns: タブレット以下では1カラムに落とす。 */
+  .hero, .top-grid, .info-columns { grid-template-columns: 1fr; }
 
   /* .menu-grid: タブレット以下では機能カードを2カラムにする。 */
   .menu-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -481,33 +458,20 @@ input[readonly] { background: #f9fbfe; }
 
 /* =========================================================
    追加: 処方箋AI読取MVP
-   使用画面: prescription_scan.php / prescription_result.php
+   使用画面: prescription_result.php
    ========================================================= */
-.scan-upload { padding: 22px; }
-.scan-layout { display: grid; grid-template-columns: .9fr 1.1fr; gap: 22px; align-items: stretch; }
-.scan-guide { display: grid; gap: 14px; align-content: start; }
-.scan-guide ul { margin: 0; padding-left: 1.2em; color: var(--muted); line-height: 1.8; }
-.camera-picker { position: relative; overflow: hidden; width: fit-content; }
-.camera-picker input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-.secondary-picker { margin-top: -4px; }
-.scan-preview-panel { display: grid; gap: 10px; }
-.scan-frame { min-height: 360px; display: grid; place-items: center; overflow: hidden; border: 2px dashed var(--line-strong); border-radius: 16px; background: #f8fbff; color: var(--muted); text-align: center; }
-.scan-frame img { width: 100%; height: 100%; object-fit: contain; display: block; }
-.scan-quality { padding: 12px; border-radius: 10px; background: #eef6ff; color: #28507d; font-size: 13px; line-height: 1.6; }
-.hint.left { text-align: left; }
 .check-note p { margin: 0 0 10px; color: var(--muted); line-height: 1.7; }
 .ocr-med-row { grid-template-columns: 34px minmax(220px, 1.5fr) minmax(180px, 1.2fr) 90px 130px; }
 .candidate-note { display: block; margin-top: 6px; color: var(--primary); font-size: 12px; line-height: 1.4; }
 @media (max-width: 760px) {
-  .scan-layout, .info-columns { grid-template-columns: 1fr; }
-  .scan-frame { min-height: 260px; }
+  .info-columns { grid-template-columns: 1fr; }
   .ocr-med-row, .edit-med-row { grid-template-columns: 1fr; }
   .row-no { width: 100%; }
 }
 
 /* =========================================================
    追加: 処方箋確認・保存前後UI改善
-   使用画面: prescription_scan.php / prescription_result.php / prescription_saved.php
+   使用画面: prescription_result.php / prescription_saved.php
    ========================================================= */
 .ocr-source-preview {
   display: grid;
@@ -557,14 +521,6 @@ input[readonly] { background: #f9fbfe; }
 .saved-summary { margin-bottom: 18px; }
 .saved-meds-table { margin-bottom: 16px; }
 .saved-qr-note { margin-bottom: 8px; }
-.scan-frame {
-  max-height: min(430px, 48vh);
-}
-.scan-frame img {
-  max-width: 100%;
-  max-height: min(430px, 48vh);
-  object-fit: contain;
-}
 
 @media (max-width: 760px) {
   .ocr-source-preview { grid-template-columns: 1fr; }
@@ -572,10 +528,7 @@ input[readonly] { background: #f9fbfe; }
   .ocr-source-preview img { max-height: 30vh; }
   .sticky-save-actions { margin-left: -8px; margin-right: -8px; }
   .sticky-save-actions .btn { width: 100%; }
-  .scan-frame { min-height: 180px; max-height: 32vh; }
-  .scan-frame img { max-height: 32vh; }
-}
-
+    }
 
 /* =========================================================
    Dynamic prescription OCR fields
