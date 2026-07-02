@@ -15,6 +15,25 @@ final class PrescriptionTemplateDetector
     {
         $width = (int)($stored['width'] ?? 0);
         $height = (int)($stored['height'] ?? 0);
+        $mime = (string)($stored['mime_type'] ?? '');
+        $features = $this->featuresFromDimensions($width, $height, $mime);
+        $fingerprint = hash('sha256', json_encode($features, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
+
+        return [
+            'layout_fingerprint' => $fingerprint,
+            'features' => $features,
+            'paper_orientation' => $orientation,
+            'match_score' => null,
+        ];
+    }
+
+
+    /**
+     * 画像そのものや個人情報を使わず、帳票レイアウトの粗い特徴だけを作る。
+     * @return array<string,string>
+     */
+    public function featuresFromDimensions(int $width, int $height, string $mime = ''): array
+    {
         $orientation = 'unknown';
         if ($width > 0 && $height > 0) {
             $orientation = $height >= $width ? 'portrait' : 'landscape';
@@ -23,34 +42,21 @@ final class PrescriptionTemplateDetector
         $ratioBucket = 'unknown';
         if ($width > 0 && $height > 0) {
             $ratio = round(max($width, $height) / max(1, min($width, $height)), 2);
-            // A4縦横比(約1.41)付近、写真寄りなどを粗く分類する。
             if ($ratio >= 1.30 && $ratio <= 1.55) {
                 $ratioBucket = 'a4_like';
             } elseif ($ratio < 1.30) {
                 $ratioBucket = 'square_like';
             } else {
-                $ratioBucket = 'long_like';
+                $ratioBucket = 'long_or_cropped';
             }
         }
 
-        $longSideBucket = $this->bucket(max($width, $height), [1200, 1600, 2200, 3000, 4200]);
-        $shortSideBucket = $this->bucket(min($width, $height), [800, 1200, 1600, 2200, 3000]);
-        $mime = (string)($stored['mime_type'] ?? '');
-
-        $features = [
+        return [
             'orientation' => $orientation,
             'ratio_bucket' => $ratioBucket,
-            'long_side_bucket' => $longSideBucket,
-            'short_side_bucket' => $shortSideBucket,
+            'long_side_bucket' => $this->bucket(max($width, $height), [1200, 1600, 2200, 3000, 4200]),
+            'short_side_bucket' => $this->bucket(min($width, $height), [800, 1200, 1600, 2200, 3000]),
             'mime' => $mime,
-        ];
-        $fingerprint = hash('sha256', json_encode($features, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
-
-        return [
-            'layout_fingerprint' => $fingerprint,
-            'features' => $features,
-            'paper_orientation' => $orientation,
-            'match_score' => null,
         ];
     }
 

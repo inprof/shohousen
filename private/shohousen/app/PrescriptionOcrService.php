@@ -52,6 +52,11 @@ final class PrescriptionOcrService
 
         $templateStart = microtime(true);
         $detectedTemplateMeta = $this->templateDetector->detectFromStored($stored);
+        try {
+            $this->knowledge->saveImageQualityLearning($jobId, $tenantId, $stored, $detectedTemplateMeta);
+        } catch (Throwable) {
+            // 画像品質の補助学習DB保存失敗でOCR処理を止めない。
+        }
         $layoutFingerprint = (string)($detectedTemplateMeta['layout_fingerprint'] ?? '');
         $template = $this->knowledge->findTemplate($layoutFingerprint);
         $templateMs = self::elapsedMs($templateStart);
@@ -64,7 +69,7 @@ final class PrescriptionOcrService
         $openaiStart = microtime(true);
         try {
             $pdo->prepare('UPDATE prescription_parse_jobs SET status = "analyzing" WHERE id = :id')->execute([':id' => $jobId]);
-            $ai = $this->openai->extractFromImage($stored['path'], $stored['mime_type'], $template ?: $detectedTemplateMeta);
+            $ai = $this->openai->extractFromImage($stored['path'], $stored['mime_type'], $template);
             $openaiMs = self::elapsedMs($openaiStart);
             $correctionStart = microtime(true);
             $normalized = $this->correction->applyCandidates($ai['normalized']);
