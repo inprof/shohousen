@@ -21,9 +21,13 @@ $prescription = $data['prescription'] ?? [];
 $medical = $data['medical_institution'] ?? [];
 $medications = $data['medications'] ?? [];
 $dynamicFields = is_array($data['form_fields'] ?? null) ? $data['form_fields'] : [];
-if (!$medications) {
-    $medications = [['drug_name' => '', 'usage_text' => '', 'days_count' => '', 'amount_text' => '']];
-}
+$knowledgeService = new PrescriptionKnowledgeService();
+// private側の反映漏れや古いキャッシュがあっても解析結果画面をFatalで止めない。
+// branchFieldPreferenceMap() は補助学習DBから拠点ごとの初期チェック状態を取得するだけなので、
+// 未反映時は空配列として扱い、画面表示と保存処理を優先する。
+$fieldPreferences = method_exists($knowledgeService, 'branchFieldPreferenceMap')
+    ? $knowledgeService->branchFieldPreferenceMap()
+    : [];
 $fieldGroupLabels = [
     'patient' => '患者情報',
     'insurance' => '保険情報',
@@ -36,12 +40,20 @@ $fieldGroupLabels = [
     'qr' => 'QR・コード',
     'other' => 'その他',
 ];
+$fieldGroupOrder = array_keys($fieldGroupLabels);
+usort($dynamicFields, static function (array $a, array $b) use ($fieldGroupOrder): int {
+    $ga = array_search((string)($a['field_group'] ?? 'other'), $fieldGroupOrder, true);
+    $gb = array_search((string)($b['field_group'] ?? 'other'), $fieldGroupOrder, true);
+    $ga = $ga === false ? 999 : $ga;
+    $gb = $gb === false ? 999 : $gb;
+    if ($ga === $gb) {
+        return strcmp((string)($a['field_label'] ?? ''), (string)($b['field_label'] ?? ''));
+    }
+    return $ga <=> $gb;
+});
 View::header('解析結果確認');
 ?>
-<section class="page-title">
-  <h1>解析結果確認</h1>
-  <p>AIが読み取った結果を人間が修正します。ここではまだDB保存しません。次の画面で「どの項目を使うか」を選択してから確定保存します。</p>
-</section>
+<section class="page-title"><h1>解析結果確認</h1><p>AI解析結果と補正候補を確認し、必要に応じて修正してから確定保存してください。QRは保存完了後に作成します。</p></section>
 <?php if (!empty($data['warnings'])): ?>
   <div class="alert info"><strong>解析メモ</strong><br><?= h(implode(' / ', array_map('strval', $data['warnings']))) ?></div>
 <?php endif; ?>
@@ -49,45 +61,16 @@ View::header('解析結果確認');
   <section class="card ocr-source-preview">
     <div>
       <h2>撮影画像</h2>
-      <p>元画像は別画面で確認できます。画面内の入力欄を優先するため、ここでは縮小表示しています。</p>
+      <p>画像は画面内に収まる大きさで表示します。元画像が大きい場合でも、確認ボタンが隠れにくいように調整しています。</p>
     </div>
     <a class="btn ghost" href="<?= h(app_url('/prescription_job_image.php?job_id=' . (string)$jobId)) ?>" target="_blank" rel="noopener">画像を別画面で開く</a>
     <img src="<?= h(app_url('/prescription_job_image.php?job_id=' . (string)$jobId)) ?>" alt="撮影した処方箋画像" loading="lazy">
   </section>
 <?php endif; ?>
-<form class="card result-card" method="post" action="<?= h(app_url('/prescription_field_select.php')) ?>" id="prescriptionConfirmForm">
+<form class="card result-card" method="post" action="<?= h(app_url('/prescription_save.php')) ?>">
   <?= Csrf::field() ?>
   <input type="hidden" name="parse_job_id" value="<?= h((string)$jobId) ?>">
   <input type="hidden" name="ai_confidence" value="<?= h((string)($data['overall_confidence'] ?? '')) ?>">
-
-  <input type="hidden" name="ai_patient_name" value="<?= h((string)($patient['name'] ?? '')) ?>">
-  <input type="hidden" name="ai_gender" value="<?= h((string)($patient['gender'] ?? '')) ?>">
-  <input type="hidden" name="ai_birth_date" value="<?= h((string)($patient['birth_date'] ?? '')) ?>">
-  <input type="hidden" name="ai_insurance_no" value="<?= h((string)($insurance['insurance_no'] ?? '')) ?>">
-  <input type="hidden" name="ai_insured_symbol_number" value="<?= h((string)($insurance['insured_symbol_number'] ?? '')) ?>">
-  <input type="hidden" name="ai_copay_rate" value="<?= h((string)($insurance['copay_rate'] ?? '')) ?>">
-  <input type="hidden" name="ai_issued_on" value="<?= h((string)($prescription['issued_on'] ?? '')) ?>">
-  <input type="hidden" name="ai_medical_institution_code" value="<?= h((string)($medical['code'] ?? '')) ?>">
-  <input type="hidden" name="ai_medical_institution_name" value="<?= h((string)($medical['name'] ?? '')) ?>">
-
-  <?php foreach ($dynamicFields as $i => $field): ?>
-    <input type="hidden" name="original_dynamic_key[]" value="<?= h((string)($field['field_key'] ?? ('field_' . $i))) ?>">
-    <input type="hidden" name="original_dynamic_label[]" value="<?= h((string)($field['field_label'] ?? ($field['field_key'] ?? ('field_' . $i)))) ?>">
-    <input type="hidden" name="original_dynamic_group[]" value="<?= h((string)($field['field_group'] ?? 'other')) ?>">
-    <input type="hidden" name="original_dynamic_value[]" value="<?= h((string)($field['value'] ?? '')) ?>">
-    <input type="hidden" name="original_dynamic_source_section[]" value="<?= h((string)($field['source_section'] ?? '')) ?>">
-    <input type="hidden" name="original_dynamic_confidence[]" value="<?= h((string)($field['confidence'] ?? '')) ?>">
-    <input type="hidden" name="original_dynamic_needs_human_check[]" value="<?= !empty($field['needs_human_check']) ? '1' : '0' ?>">
-    <input type="hidden" name="original_dynamic_include_default[]" value="<?= !empty($field['include_default']) ? '1' : '0' ?>">
-  <?php endforeach; ?>
-
-  <div class="confirm-flow-note">
-    <span class="flow-step active">1. 読み取り結果を修正</span>
-    <span class="flow-step">2. 使用項目を選択</span>
-    <span class="flow-step">3. DB保存</span>
-    <span class="flow-step">4. QR作成</span>
-  </div>
-
   <div class="info-columns">
     <section>
       <h2>患者情報</h2>
@@ -119,22 +102,18 @@ View::header('解析結果確認');
       <h2>確認方針</h2>
       <div class="definition-list check-note">
         <p>AI信頼度：<?= h((string)($data['overall_confidence'] ?? '')) ?>%</p>
-        <p>薬品が1行にまとまった場合や、一般名・商品名が別薬として分かれた場合は、この画面で行を追加・削除してから次へ進みます。</p>
+        <p>医療情報のため、補正候補は自動確定せず、人間確認後に保存します。</p>
       </div>
     </section>
   </div>
-
-  <div class="section-title-row">
-    <h2>処方薬情報（<span id="medCount"><?= count($medications) ?></span>件）</h2>
-    <button class="btn ghost small" type="button" id="addMedicationRow">薬品行を追加</button>
-  </div>
-  <div class="edit-med-list" id="medicationList">
+  <h2>処方薬情報（<?= count($medications) ?>件）</h2>
+  <p class="form-help">一般名・商品名・元の読み取り行も学習対象として保存します。商品名と一般名が同じ処方内に併記されている場合は、1つの薬品行にまとめてください。</p>
+  <div class="edit-med-list" data-med-list>
     <?php foreach ($medications as $i => $med): $drugCandidates = $candidates['medications'][$i]['drug_name'] ?? []; ?>
-      <div class="edit-med-row ocr-med-row" data-med-row>
-        <div class="row-no" data-row-no><?= $i + 1 ?></div>
-        <label>薬品名
-          <input name="drug_name[]" value="<?= h((string)($med['drug_name'] ?? '')) ?>" list="drugCandidates<?= $i ?>">
-          <input type="hidden" name="ai_drug_name[]" value="<?= h((string)($med['drug_name'] ?? '')) ?>">
+      <div class="edit-med-row ocr-med-row">
+        <span class="row-no"><?= $i + 1 ?></span>
+        <label class="med-field-main">薬品名（代表名）
+          <textarea name="drug_name[]" rows="2" list="drugCandidates<?= $i ?>" placeholder="保存する代表薬品名"><?= h((string)($med['drug_name'] ?? '')) ?></textarea>
           <?php if ($drugCandidates): ?>
             <datalist id="drugCandidates<?= $i ?>">
               <?php foreach ($drugCandidates as $candidate): ?><option value="<?= h((string)$candidate['candidate_value']) ?>"><?php endforeach; ?>
@@ -142,18 +121,16 @@ View::header('解析結果確認');
             <small class="candidate-note">候補: <?= h(implode(' / ', array_map(fn($c) => $c['candidate_value'] . '（' . $c['score'] . '）', $drugCandidates))) ?></small>
           <?php endif; ?>
         </label>
-        <label>用法
-          <input name="usage_text[]" value="<?= h((string)($med['usage_text'] ?? '')) ?>">
-          <input type="hidden" name="ai_usage_text[]" value="<?= h((string)($med['usage_text'] ?? '')) ?>">
+        <label>一般名候補<input name="generic_name[]" value="<?= h((string)($med['generic_name'] ?? '')) ?>" placeholder="例: アンブロキソール塩酸塩"></label>
+        <label>商品名候補<input name="brand_name[]" value="<?= h((string)($med['brand_name'] ?? '')) ?>" placeholder="例: ムコソルバン錠"></label>
+        <label class="med-field-raw">薬品名元テキスト
+          <textarea name="raw_drug_text[]" rows="3" placeholder="AIが読んだ薬品名行。一般名・商品名を改行で残せます。
+例: ムコソルバン錠15mg
+【般】アンブロキソール塩酸塩錠15mg"><?= h((string)($med['raw_drug_text'] ?? ($med['drug_name'] ?? ''))) ?></textarea>
         </label>
-        <label>日数
-          <input type="number" name="days_count[]" value="<?= h((string)($med['days_count'] ?? '')) ?>">
-          <input type="hidden" name="ai_days_count[]" value="<?= h((string)($med['days_count'] ?? '')) ?>">
-        </label>
-        <label>総量/備考
-          <input name="amount_text[]" value="<?= h((string)($med['amount_text'] ?? '')) ?>">
-          <input type="hidden" name="ai_amount_text[]" value="<?= h((string)($med['amount_text'] ?? '')) ?>">
-        </label>
+        <label>用法<input name="usage_text[]" value="<?= h((string)($med['usage_text'] ?? '')) ?>"></label>
+        <label>日数<input type="number" name="days_count[]" value="<?= h((string)($med['days_count'] ?? '')) ?>"></label>
+        <label>総量/備考<input name="amount_text[]" value="<?= h((string)($med['amount_text'] ?? '')) ?>"></label>
         <label>在庫
           <select name="stock_status[]">
             <?php foreach (['adopted'=>'採用薬','in_stock'=>'在庫あり','low_stock'=>'在庫僅少','not_stocked'=>'未採用','unknown'=>'未確認'] as $key => $label): ?>
@@ -161,86 +138,162 @@ View::header('解析結果確認');
             <?php endforeach; ?>
           </select>
         </label>
-        <button class="btn danger ghost small med-remove" type="button" data-remove-med>この薬を削除</button>
+        <label>薬品名の関係
+          <select name="drug_name_relation_type[]">
+            <?php $rel = (string)($med['name_relation'] ?? 'unknown'); ?>
+            <?php foreach (['single'=>'単独薬品名','generic_brand_pair'=>'一般名・商品名の併記','multiple_candidates'=>'複数候補/要整理','unknown'=>'不明'] as $key => $label): ?>
+              <option value="<?= h($key) ?>" <?= $key === $rel ? 'selected' : '' ?>><?= h($label) ?></option>
+            <?php endforeach; ?>
+          </select>
+        </label>
+        <input type="hidden" name="ai_drug_name[]" value="<?= h((string)($med['drug_name'] ?? '')) ?>">
+        <input type="hidden" name="ai_generic_name[]" value="<?= h((string)($med['generic_name'] ?? '')) ?>">
+        <input type="hidden" name="ai_brand_name[]" value="<?= h((string)($med['brand_name'] ?? '')) ?>">
+        <input type="hidden" name="ai_raw_drug_text[]" value="<?= h((string)($med['raw_drug_text'] ?? ($med['drug_name'] ?? ''))) ?>">
+        <button class="btn danger ghost med-delete-button" type="button" data-delete-med>この薬を削除</button>
       </div>
     <?php endforeach; ?>
   </div>
+  <div class="button-row med-list-actions"><button class="btn ghost" type="button" data-add-med>薬品行を追加</button></div>
+  <template id="medicationRowTemplate">
+    <div class="edit-med-row ocr-med-row">
+      <span class="row-no">__NO__</span>
+      <label class="med-field-main">薬品名（代表名）<textarea name="drug_name[]" rows="2" placeholder="保存する代表薬品名"></textarea></label>
+      <label>一般名候補<input name="generic_name[]" value="" placeholder="一般名候補"></label>
+      <label>商品名候補<input name="brand_name[]" value="" placeholder="商品名候補"></label>
+      <label class="med-field-raw">薬品名元テキスト<textarea name="raw_drug_text[]" rows="3" placeholder="AI読み取り行や追加入力を残します"></textarea></label>
+      <label>用法<input name="usage_text[]" value=""></label>
+      <label>日数<input type="number" name="days_count[]" value=""></label>
+      <label>総量/備考<input name="amount_text[]" value=""></label>
+      <label>在庫<select name="stock_status[]"><option value="unknown" selected>未確認</option><option value="adopted">採用薬</option><option value="in_stock">在庫あり</option><option value="low_stock">在庫僅少</option><option value="not_stocked">未採用</option></select></label>
+      <label>薬品名の関係<select name="drug_name_relation_type[]"><option value="unknown" selected>不明</option><option value="single">単独薬品名</option><option value="generic_brand_pair">一般名・商品名の併記</option><option value="multiple_candidates">複数候補/要整理</option></select></label>
+      <input type="hidden" name="ai_drug_name[]" value="">
+      <input type="hidden" name="ai_generic_name[]" value="">
+      <input type="hidden" name="ai_brand_name[]" value="">
+      <input type="hidden" name="ai_raw_drug_text[]" value="">
+      <button class="btn danger ghost med-delete-button" type="button" data-delete-med>この薬を削除</button>
+    </div>
+  </template>
+  <section class="dynamic-field-card">
+    <div class="dynamic-field-head">
+      <div>
+        <h2>読み取り項目の選択</h2>
+        <p>画像内でAIが読み取った項目をすべて表示します。QRや後続出力に使う項目だけチェックを入れてください。未チェックでも確認画面上では残るため、不要項目の判断履歴として補助学習DBに反映されます。</p>
+      </div>
+      <div class="field-actions">
+        <button class="btn ghost small" type="button" data-field-check="all">全選択</button>
+        <button class="btn ghost small" type="button" data-field-check="none">全解除</button>
+      </div>
+    </div>
 
-  <div class="actions sticky-save-actions">
-    <a class="btn ghost" href="<?= h(app_url('/prescription_scan.php')) ?>">撮り直す</a>
-    <button class="btn primary" type="submit">使用項目の選択へ進む</button>
+    <?php if (!$dynamicFields): ?>
+      <div class="alert warning">AIが動的項目を返していません。固定項目だけを保存します。プロンプトまたはOpenAI応答を確認してください。</div>
+    <?php else: ?>
+      <div class="dynamic-field-grid">
+        <?php $currentGroup = null; ?>
+        <?php foreach ($dynamicFields as $i => $field): ?>
+          <?php
+            $group = (string)($field['field_group'] ?? 'other');
+            if (!isset($fieldGroupLabels[$group])) { $group = 'other'; }
+            $key = (string)($field['field_key'] ?? ('field_' . $i));
+            $label = (string)($field['field_label'] ?? $key);
+            $value = (string)($field['value'] ?? '');
+            $confidence = is_numeric($field['confidence'] ?? null) ? (float)$field['confidence'] : null;
+            $includeDefault = array_key_exists($key, $fieldPreferences) ? (bool)$fieldPreferences[$key] : (bool)($field['include_default'] ?? false);
+            if ($currentGroup !== $group):
+              $currentGroup = $group;
+          ?>
+            <h3 class="dynamic-field-group"><?= h($fieldGroupLabels[$group]) ?></h3>
+          <?php endif; ?>
+
+          <div class="dynamic-field-row <?= !empty($field['needs_human_check']) ? 'needs-check' : '' ?>">
+            <label class="field-use-check">
+              <input type="checkbox" name="dynamic_field_selected[<?= $i ?>]" value="1" <?= $includeDefault ? 'checked' : '' ?>>
+              <span>使う</span>
+            </label>
+
+            <div class="field-main">
+              <label>
+                <span class="field-label"><?= h($label) ?></span>
+                <input name="dynamic_field_value[<?= $i ?>]" value="<?= h($value) ?>" placeholder="空欄">
+              </label>
+              <div class="field-meta">
+                <span><?= h((string)($field['source_section'] ?? '')) ?></span>
+                <?php if ($confidence !== null): ?><span>信頼度 <?= h((string)round($confidence, 1)) ?>%</span><?php endif; ?>
+                <?php if (!empty($field['needs_human_check'])): ?><span class="attention">要確認</span><?php endif; ?>
+              </div>
+            </div>
+
+            <input type="hidden" name="dynamic_field_key[<?= $i ?>]" value="<?= h($key) ?>">
+            <input type="hidden" name="dynamic_field_label[<?= $i ?>]" value="<?= h($label) ?>">
+            <input type="hidden" name="dynamic_field_group[<?= $i ?>]" value="<?= h($group) ?>">
+            <input type="hidden" name="dynamic_field_ai_value[<?= $i ?>]" value="<?= h($value) ?>">
+            <input type="hidden" name="dynamic_field_source_section[<?= $i ?>]" value="<?= h((string)($field['source_section'] ?? '')) ?>">
+            <input type="hidden" name="dynamic_field_confidence[<?= $i ?>]" value="<?= h((string)($confidence ?? '')) ?>">
+            <input type="hidden" name="dynamic_field_needs_human_check[<?= $i ?>]" value="<?= !empty($field['needs_human_check']) ? '1' : '0' ?>">
+            <input type="hidden" name="dynamic_field_output_candidate[<?= $i ?>]" value="<?= !empty($field['output_candidate']) ? '1' : '0' ?>">
+          </div>
+        <?php endforeach; ?>
+      </div>
+    <?php endif; ?>
+  </section>
+
+  <div class="button-row end sticky-save-actions">
+    <a class="btn ghost" href="<?= h(app_url('/prescription_scan.php')) ?>">再撮影</a>
+    <button class="btn primary" type="submit">選択項目を含めてDB保存</button>
   </div>
 </form>
-
-<template id="medicationRowTemplate">
-  <div class="edit-med-row ocr-med-row" data-med-row>
-    <div class="row-no" data-row-no></div>
-    <label>薬品名
-      <input name="drug_name[]" value="">
-      <input type="hidden" name="ai_drug_name[]" value="">
-    </label>
-    <label>用法
-      <input name="usage_text[]" value="">
-      <input type="hidden" name="ai_usage_text[]" value="">
-    </label>
-    <label>日数
-      <input type="number" name="days_count[]" value="">
-      <input type="hidden" name="ai_days_count[]" value="">
-    </label>
-    <label>総量/備考
-      <input name="amount_text[]" value="">
-      <input type="hidden" name="ai_amount_text[]" value="">
-    </label>
-    <label>在庫
-      <select name="stock_status[]">
-        <option value="adopted">採用薬</option>
-        <option value="in_stock">在庫あり</option>
-        <option value="low_stock">在庫僅少</option>
-        <option value="not_stocked">未採用</option>
-        <option value="unknown" selected>未確認</option>
-      </select>
-    </label>
-    <button class="btn danger ghost small med-remove" type="button" data-remove-med>この薬を削除</button>
-  </div>
-</template>
-
 <script>
 (function () {
-  const list = document.getElementById('medicationList');
-  const template = document.getElementById('medicationRowTemplate');
-  const addButton = document.getElementById('addMedicationRow');
-  const count = document.getElementById('medCount');
-
-  function refreshNumbers() {
-    const rows = Array.from(list.querySelectorAll('[data-med-row]'));
-    rows.forEach((row, index) => {
-      const no = row.querySelector('[data-row-no]');
+  function renumberMedicationRows() {
+    document.querySelectorAll('[data-med-list] .ocr-med-row').forEach(function (row, index) {
+      var no = row.querySelector('.row-no');
       if (no) no.textContent = String(index + 1);
     });
-    if (count) count.textContent = String(rows.length);
   }
 
-  addButton?.addEventListener('click', () => {
-    const node = template.content.firstElementChild.cloneNode(true);
-    list.appendChild(node);
-    refreshNumbers();
-    const first = node.querySelector('input[name="drug_name[]"]');
-    if (first) first.focus();
+  document.addEventListener('click', function (event) {
+    var target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+
+    var mode = target.getAttribute('data-field-check');
+    if (mode) {
+      document.querySelectorAll('.dynamic-field-row input[type="checkbox"]').forEach(function (checkbox) {
+        checkbox.checked = mode === 'all';
+      });
+      return;
+    }
+
+    if (target.hasAttribute('data-delete-med')) {
+      var row = target.closest('.ocr-med-row');
+      if (!row) return;
+      row.querySelectorAll('input, textarea').forEach(function (input) { input.value = ''; });
+      row.querySelectorAll('select').forEach(function (select) { select.value = select.name === 'drug_name_relation_type[]' ? 'unknown' : 'unknown'; });
+      row.remove();
+      renumberMedicationRows();
+      return;
+    }
+
+    if (target.hasAttribute('data-add-med')) {
+      var list = document.querySelector('[data-med-list]');
+      var tmpl = document.getElementById('medicationRowTemplate');
+      if (!list || !tmpl) return;
+      var html = tmpl.innerHTML.replace(/__NO__/g, String(list.querySelectorAll('.ocr-med-row').length + 1));
+      var wrap = document.createElement('div');
+      wrap.innerHTML = html.trim();
+      list.appendChild(wrap.firstElementChild);
+      renumberMedicationRows();
+    }
   });
 
-  list?.addEventListener('click', (event) => {
-    const target = event.target;
-    if (!(target instanceof HTMLElement) || !target.matches('[data-remove-med]')) return;
-    const row = target.closest('[data-med-row]');
-    if (!row) return;
-    const rows = list.querySelectorAll('[data-med-row]');
-    if (rows.length <= 1) {
-      row.querySelectorAll('input').forEach((input) => input.value = '');
-      row.querySelectorAll('select').forEach((select) => select.value = 'unknown');
-    } else {
-      row.remove();
+  document.addEventListener('keydown', function (event) {
+    var target = event.target;
+    if (!(target instanceof HTMLElement)) return;
+    if (event.key !== 'Enter') return;
+    if (target.tagName === 'TEXTAREA') return;
+    if (target.closest('.result-card') && target.tagName === 'INPUT') {
+      event.preventDefault();
     }
-    refreshNumbers();
   });
 })();
 </script>

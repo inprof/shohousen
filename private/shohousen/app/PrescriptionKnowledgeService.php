@@ -123,17 +123,52 @@ final class PrescriptionKnowledgeService
         if ($value === '') {
             return [];
         }
+        $rows = [];
         try {
-            $stmt = Db::knowledge()->prepare('SELECT dm.drug_name, da.alias_name
-                FROM drug_aliases da
-                INNER JOIN drug_master dm ON dm.id = da.drug_master_id
-                WHERE da.alias_name = :value OR dm.drug_name = :value
-                LIMIT 5');
-            $stmt->execute([':value' => $value]);
-            return $stmt->fetchAll();
+            if (Db::tableExists(Db::knowledge(), 'drug_aliases') && Db::tableExists(Db::knowledge(), 'drug_master')) {
+                $stmt = Db::knowledge()->prepare('SELECT dm.drug_name, da.alias_name, da.alias_type, 100 AS score
+                    FROM drug_aliases da
+                    INNER JOIN drug_master dm ON dm.id = da.drug_master_id
+                    WHERE da.alias_name = :value OR dm.drug_name = :value
+                    LIMIT 5');
+                $stmt->execute([':value' => $value]);
+                $rows = array_merge($rows, $stmt->fetchAll());
+            }
+
+            if (Db::tableExists(Db::knowledge(), 'drug_name_relation_preferences')) {
+                $like = '%' . $value . '%';
+                $stmt = Db::knowledge()->prepare('SELECT display_drug_name AS drug_name,
+                        CONCAT_WS(" / ", NULLIF(generic_name, ""), NULLIF(brand_name, "")) AS alias_name,
+                        "generic_brand_pair" AS alias_type,
+                        LEAST(100, 60 + confirmed_count * 5 + observed_count) AS score
+                    FROM drug_name_relation_preferences
+                    WHERE company_uid = :company_uid
+                      AND branch_uid = :branch_uid
+                      AND (display_drug_name LIKE :like OR generic_name LIKE :like OR brand_name LIKE :like)
+                    ORDER BY confirmed_count DESC, observed_count DESC, updated_at DESC
+                    LIMIT 5');
+                $stmt->execute([
+                    ':company_uid' => current_company_uid(),
+                    ':branch_uid' => current_branch_uid(),
+                    ':like' => $like,
+                ]);
+                $rows = array_merge($rows, $stmt->fetchAll());
+            }
         } catch (Throwable) {
-            return [];
+            return $rows;
         }
+
+        $seen = [];
+        $out = [];
+        foreach ($rows as $row) {
+            $key = (string)($row['drug_name'] ?? '') . '|' . (string)($row['alias_name'] ?? '');
+            if ($key === '|' || isset($seen[$key])) {
+                continue;
+            }
+            $seen[$key] = true;
+            $out[] = $row;
+        }
+        return array_slice($out, 0, 8);
     }
 
     public function upsertCorrectionRule(string $fieldType, string $wrongValue, string $correctValue): void
@@ -144,7 +179,7 @@ final class PrescriptionKnowledgeService
             return;
         }
         // 患者・保険など個人性/請求影響が強いものはナレッジDBへ昇格しない。
-        if (!in_array($fieldType, ['drug_name', 'usage_text', 'medical_institution_name'], true)) {
+        if (!in_array($fieldType, ['drug_name', 'drug_generic_name', 'drug_brand_name', 'drug_raw_text', 'usage_text', 'medical_institution_name'], true)) {
             return;
         }
         $sql = 'INSERT INTO prescription_auto_correction_rules
@@ -270,6 +305,184 @@ final class PrescriptionKnowledgeService
             return $map;
         } catch (Throwable) {
             return [];
+        }
+    }
+
+
+    /**
+     * 薬品名・一般名・商品名の人間修正結果を補助学習DBへ蓄積する。
+     * 患者情報とは切り離し、薬品名同士の紐づけ候補として扱う。
+     *
+     * @param array<int,array<string,mixed>> $rows
+     */
+    public function saveDrugNameLearningEvents(?int $parseJobId, int $tenantId, int $prescriptionId, array $rows): void
+    {
+        if (!$rows) {
+            return;
+        }
+
+        try {
+            $eventStmt = null;
+            if (Db::tableExists(Db::knowledge(), 'drug_name_relation_observations')) {
+                $eventStmt = Db::knowledge()->prepare('INSERT INTO drug_name_relation_observations
+                    (company_uid, branch_uid, tenant_id, parse_job_id, prescription_id, medication_sort_order,
+                     ai_drug_name, final_drug_name, ai_generic_name, final_generic_name, ai_brand_name, final_brand_name,
+                     ai_raw_drug_text, final_raw_drug_text, relation_type, action_type, created_at)
+                    VALUES
+                    (:company_uid, :branch_uid, :tenant_id, :parse_job_id, :prescription_id, :medication_sort_order,
+                     :ai_drug_name, :final_drug_name, :ai_generic_name, :final_generic_name, :ai_brand_name, :final_brand_name,
+                     :ai_raw_drug_text, :final_raw_drug_text, :relation_type, :action_type, NOW())');
+            }
+
+            $prefStmt = null;
+            if (Db::tableExists(Db::knowledge(), 'drug_name_relation_preferences')) {
+                $prefStmt = Db::knowledge()->prepare('INSERT INTO drug_name_relation_preferences
+                    (company_uid, branch_uid, pair_key, generic_name, brand_name, display_drug_name, raw_example,
+                     observed_count, confirmed_count, edited_count, last_seen_at, created_at, updated_at)
+                    VALUES
+                    (:company_uid, :branch_uid, :pair_key, :generic_name, :brand_name, :display_drug_name, :raw_example,
+                     1, :confirmed_count, :edited_count, NOW(), NOW(), NOW())
+                    ON DUPLICATE KEY UPDATE
+                        generic_name = CASE WHEN VALUES(generic_name) <> "" THEN VALUES(generic_name) ELSE generic_name END,
+                        brand_name = CASE WHEN VALUES(brand_name) <> "" THEN VALUES(brand_name) ELSE brand_name END,
+                        display_drug_name = CASE WHEN VALUES(display_drug_name) <> "" THEN VALUES(display_drug_name) ELSE display_drug_name END,
+                        raw_example = CASE WHEN VALUES(raw_example) <> "" THEN VALUES(raw_example) ELSE raw_example END,
+                        observed_count = observed_count + 1,
+                        confirmed_count = confirmed_count + VALUES(confirmed_count),
+                        edited_count = edited_count + VALUES(edited_count),
+                        last_seen_at = NOW(),
+                        updated_at = NOW()');
+            }
+
+            foreach ($rows as $row) {
+                $finalDrug = trim((string)($row['final_drug_name'] ?? ''));
+                $finalGeneric = trim((string)($row['final_generic_name'] ?? ''));
+                $finalBrand = trim((string)($row['final_brand_name'] ?? ''));
+                $finalRaw = trim((string)($row['final_raw_drug_text'] ?? ''));
+                $aiDrug = trim((string)($row['ai_drug_name'] ?? ''));
+                $aiGeneric = trim((string)($row['ai_generic_name'] ?? ''));
+                $aiBrand = trim((string)($row['ai_brand_name'] ?? ''));
+                $aiRaw = trim((string)($row['ai_raw_drug_text'] ?? ''));
+                $relationType = (string)($row['relation_type'] ?? 'unknown');
+                if (!in_array($relationType, ['single','generic_brand_pair','multiple_candidates','unknown'], true)) {
+                    $relationType = 'unknown';
+                }
+                $actionType = (string)($row['action_type'] ?? 'confirmed');
+                if (!in_array($actionType, ['confirmed','edited','merged','deleted','added'], true)) {
+                    $actionType = 'edited';
+                }
+
+                if ($eventStmt) {
+                    $eventStmt->execute([
+                        ':company_uid' => current_company_uid(),
+                        ':branch_uid' => current_branch_uid(),
+                        ':tenant_id' => $tenantId,
+                        ':parse_job_id' => $parseJobId,
+                        ':prescription_id' => $prescriptionId,
+                        ':medication_sort_order' => (int)($row['sort_order'] ?? 0),
+                        ':ai_drug_name' => $aiDrug,
+                        ':final_drug_name' => $finalDrug,
+                        ':ai_generic_name' => $aiGeneric,
+                        ':final_generic_name' => $finalGeneric,
+                        ':ai_brand_name' => $aiBrand,
+                        ':final_brand_name' => $finalBrand,
+                        ':ai_raw_drug_text' => $aiRaw,
+                        ':final_raw_drug_text' => $finalRaw,
+                        ':relation_type' => $relationType,
+                        ':action_type' => $actionType,
+                    ]);
+                }
+
+                $displayDrug = $finalDrug !== '' ? $finalDrug : ($finalBrand !== '' ? $finalBrand : $finalGeneric);
+                $pairKey = $this->drugPairKey($finalGeneric, $finalBrand, $displayDrug);
+                if ($prefStmt && $pairKey !== '') {
+                    $prefStmt->execute([
+                        ':company_uid' => current_company_uid(),
+                        ':branch_uid' => current_branch_uid(),
+                        ':pair_key' => $pairKey,
+                        ':generic_name' => $finalGeneric,
+                        ':brand_name' => $finalBrand,
+                        ':display_drug_name' => $displayDrug,
+                        ':raw_example' => mb_substr($finalRaw, 0, 1000),
+                        ':confirmed_count' => $actionType === 'confirmed' ? 1 : 0,
+                        ':edited_count' => $actionType !== 'confirmed' ? 1 : 0,
+                    ]);
+                }
+
+                $this->upsertDrugMasterAndAliases($displayDrug, $finalGeneric, $finalBrand, $finalRaw);
+            }
+        } catch (Throwable) {
+            // 補助学習DBの未反映・一時不調で処方箋確定保存を止めない。
+        }
+    }
+
+    private function drugPairKey(string $genericName, string $brandName, string $displayDrugName): string
+    {
+        $parts = array_map([$this, 'normalizeDrugKeyPart'], [$genericName, $brandName, $displayDrugName]);
+        $joined = implode('|', array_filter($parts, static fn($v) => $v !== ''));
+        return $joined === '' ? '' : sha1($joined);
+    }
+
+    private function normalizeDrugKeyPart(string $value): string
+    {
+        $value = mb_convert_kana(trim($value), 'asKV', 'UTF-8');
+        $value = mb_strtolower($value);
+        $value = preg_replace('/\s+/u', '', $value) ?? $value;
+        $value = preg_replace('/[【】\[\]（）()「」『』]/u', '', $value) ?? $value;
+        return $value;
+    }
+
+    private function upsertDrugMasterAndAliases(string $displayDrugName, string $genericName, string $brandName, string $rawDrugText): void
+    {
+        $displayDrugName = trim($displayDrugName);
+        if ($displayDrugName === '' || !Db::tableExists(Db::knowledge(), 'drug_master')) {
+            return;
+        }
+
+        try {
+            $normalized = $this->normalizeDrugKeyPart($displayDrugName);
+            $stmt = Db::knowledge()->prepare('INSERT INTO drug_master
+                (drug_name, normalized_name, is_active, created_at, updated_at)
+                VALUES (:drug_name, :normalized_name, 1, NOW(), NOW())
+                ON DUPLICATE KEY UPDATE normalized_name = VALUES(normalized_name), updated_at = NOW(), id = LAST_INSERT_ID(id)');
+            $stmt->execute([':drug_name' => $displayDrugName, ':normalized_name' => $normalized]);
+            $drugMasterId = (int)Db::knowledge()->lastInsertId();
+            if ($drugMasterId <= 0) {
+                $sel = Db::knowledge()->prepare('SELECT id FROM drug_master WHERE drug_name = :drug_name LIMIT 1');
+                $sel->execute([':drug_name' => $displayDrugName]);
+                $drugMasterId = (int)$sel->fetchColumn();
+            }
+            if ($drugMasterId <= 0 || !Db::tableExists(Db::knowledge(), 'drug_aliases')) {
+                return;
+            }
+
+            $aliasStmt = Db::knowledge()->prepare('INSERT INTO drug_aliases
+                (drug_master_id, alias_name, alias_type, created_at)
+                VALUES (:drug_master_id, :alias_name, :alias_type, NOW())
+                ON DUPLICATE KEY UPDATE alias_type = VALUES(alias_type)');
+
+            $aliases = [];
+            if ($genericName !== '' && $genericName !== $displayDrugName) {
+                $aliases[$genericName] = 'generic_name';
+            }
+            if ($brandName !== '' && $brandName !== $displayDrugName) {
+                $aliases[$brandName] = 'brand_name';
+            }
+            foreach (preg_split('/\R/u', $rawDrugText) ?: [] as $line) {
+                $line = trim($line);
+                if ($line !== '' && $line !== $displayDrugName && !isset($aliases[$line])) {
+                    $aliases[$line] = 'raw_drug_line';
+                }
+            }
+
+            foreach ($aliases as $aliasName => $aliasType) {
+                $aliasStmt->execute([
+                    ':drug_master_id' => $drugMasterId,
+                    ':alias_name' => mb_substr((string)$aliasName, 0, 255),
+                    ':alias_type' => $aliasType,
+                ]);
+            }
+        } catch (Throwable) {
         }
     }
 

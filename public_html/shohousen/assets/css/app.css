@@ -703,147 +703,35 @@ input[readonly] { background: #f9fbfe; }
   }
 }
 
-/* =========================================================
-   追加: 解析結果修正 → 使用項目選択 → DB保存 の2段階確認UI
-   ========================================================= */
-.confirm-flow-note {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 0 0 18px;
-}
-.flow-step {
-  display: inline-flex;
-  align-items: center;
-  min-height: 30px;
-  padding: 5px 10px;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  background: #fff;
+/* Medication name learning UI */
+.form-help {
+  margin: 4px 0 14px;
   color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-.flow-step.active {
-  border-color: #2f80ed;
-  background: #edf5ff;
-  color: #1659a8;
-}
-.flow-step.done {
-  border-color: #27ae60;
-  background: #eaf8f0;
-  color: #18733f;
-}
-.section-title-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  margin-top: 22px;
-}
-.section-title-row h2 {
-  margin: 0;
-}
-.med-remove {
-  align-self: end;
-  white-space: nowrap;
-}
-.btn.danger,
-.btn.danger.ghost {
-  border-color: #f0b8b8;
-  color: #a33;
-  background: #fffafa;
-}
-.field-selection-summary {
-  margin: 0 0 18px;
-  padding: 14px;
-  border: 1px solid var(--line);
-  border-radius: 12px;
-  background: #f8fbff;
-}
-.field-selection-summary h2 {
-  margin: 0 0 10px;
-  font-size: 16px;
-}
-.summary-grid.compact {
-  display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 10px;
-}
-.summary-grid.compact div {
-  padding: 10px;
-  border-radius: 10px;
-  background: #fff;
-  border: 1px solid var(--line);
-}
-.summary-grid.compact span {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--muted);
-  font-size: 12px;
-  font-weight: 700;
-}
-.summary-grid.compact strong {
-  display: block;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.field-select-page {
-  border-top: 0;
-  padding-top: 0;
-}
-.learning-field-row .field-main input {
-  margin-bottom: 7px;
-}
-.field-compare {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 8px;
-  margin-top: 6px;
-}
-.field-compare div {
-  min-width: 0;
-  padding: 8px;
-  border-radius: 10px;
-  background: #f7f9fc;
-  border: 1px solid #e6edf5;
-}
-.field-compare span {
-  display: block;
-  margin-bottom: 4px;
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-}
-.field-compare code,
-.field-compare strong {
-  display: block;
-  overflow-wrap: anywhere;
-  font-family: inherit;
   font-size: 13px;
-  color: var(--text);
+  line-height: 1.6;
 }
-
-@media (max-width: 850px) {
-  .summary-grid.compact {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-  .section-title-row {
-    align-items: stretch;
-    flex-direction: column;
-  }
-  .section-title-row .btn {
-    width: 100%;
-  }
+.edit-med-row textarea {
+  width: 100%;
+  min-height: 44px;
+  resize: vertical;
 }
-
-@media (max-width: 640px) {
-  .summary-grid.compact,
-  .field-compare {
-    grid-template-columns: 1fr;
-  }
-  .med-remove {
-    width: 100%;
+.edit-med-row .med-field-main,
+.edit-med-row .med-field-raw {
+  grid-column: span 2;
+}
+.med-delete-button {
+  grid-column: span 2;
+  border-color: #fecaca;
+  color: #b91c1c;
+  background: #fff7f7;
+}
+.med-list-actions {
+  margin: 8px 0 18px;
+}
+@media (max-width: 700px) {
+  .edit-med-row .med-field-main,
+  .edit-med-row .med-field-raw,
+  .med-delete-button {
+    grid-column: span 1;
   }
 }

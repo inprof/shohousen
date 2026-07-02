@@ -186,6 +186,68 @@ function save_prescription_selected_fields(PDO $pdo, int $tenantId, int $prescri
 }
 
 
+/**
+ * POSTされた薬品名関連情報を補助学習用に整形する。
+ * 一般名・商品名・AI元値・人間修正後値を同じ行に束ねる。
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function medication_name_learning_rows_from_post(array $post): array
+{
+    $drugNames = $post['drug_name'] ?? [];
+    $genericNames = $post['generic_name'] ?? [];
+    $brandNames = $post['brand_name'] ?? [];
+    $rawDrugTexts = $post['raw_drug_text'] ?? [];
+    $relations = $post['drug_name_relation_type'] ?? [];
+    $aiDrugNames = $post['ai_drug_name'] ?? [];
+    $aiGenericNames = $post['ai_generic_name'] ?? [];
+    $aiBrandNames = $post['ai_brand_name'] ?? [];
+    $aiRawDrugTexts = $post['ai_raw_drug_text'] ?? [];
+
+    $rows = [];
+    foreach ($drugNames as $i => $drugName) {
+        $finalDrug = trim((string)$drugName);
+        $finalGeneric = trim((string)($genericNames[$i] ?? ''));
+        $finalBrand = trim((string)($brandNames[$i] ?? ''));
+        $finalRaw = trim((string)($rawDrugTexts[$i] ?? ''));
+        if ($finalRaw === '') {
+            $finalRaw = implode("
+", array_values(array_filter([$finalDrug, $finalGeneric, $finalBrand], static fn($v) => trim((string)$v) !== '')));
+        }
+
+        if ($finalDrug === '' && $finalGeneric === '' && $finalBrand === '' && $finalRaw === '') {
+            continue;
+        }
+
+        $relation = (string)($relations[$i] ?? 'unknown');
+        if (!in_array($relation, ['single', 'generic_brand_pair', 'multiple_candidates', 'unknown'], true)) {
+            $relation = 'unknown';
+        }
+
+        $aiDrug = trim((string)($aiDrugNames[$i] ?? ''));
+        $aiGeneric = trim((string)($aiGenericNames[$i] ?? ''));
+        $aiBrand = trim((string)($aiBrandNames[$i] ?? ''));
+        $aiRaw = trim((string)($aiRawDrugTexts[$i] ?? ''));
+
+        $rows[] = [
+            'sort_order' => $i + 1,
+            'final_drug_name' => $finalDrug,
+            'final_generic_name' => $finalGeneric,
+            'final_brand_name' => $finalBrand,
+            'final_raw_drug_text' => $finalRaw,
+            'relation_type' => $relation,
+            'ai_drug_name' => $aiDrug,
+            'ai_generic_name' => $aiGeneric,
+            'ai_brand_name' => $aiBrand,
+            'ai_raw_drug_text' => $aiRaw,
+            'action_type' => ($aiDrug === '' && $aiGeneric === '' && $aiBrand === '' && $aiRaw === '') ? 'added' : ((trim($aiDrug . $aiGeneric . $aiBrand . $aiRaw) !== trim($finalDrug . $finalGeneric . $finalBrand . $finalRaw)) ? 'edited' : 'confirmed'),
+        ];
+    }
+
+    return $rows;
+}
+
+
 function create_prescription_from_post(array $user, array $post): int
 {
     $tenantId = (int)$user['tenant_id'];
@@ -226,20 +288,51 @@ function create_prescription_from_post(array $user, array $post): int
         $prescriptionId = (int)$pdo->lastInsertId();
 
         $drugNames = $post['drug_name'] ?? [];
+        $genericNames = $post['generic_name'] ?? [];
+        $brandNames = $post['brand_name'] ?? [];
+        $rawDrugTexts = $post['raw_drug_text'] ?? [];
+        $relationTypes = $post['drug_name_relation_type'] ?? [];
+        $aiDrugNames = $post['ai_drug_name'] ?? [];
+        $aiGenericNames = $post['ai_generic_name'] ?? [];
+        $aiBrandNames = $post['ai_brand_name'] ?? [];
         $usageTexts = $post['usage_text'] ?? [];
         $daysCounts = $post['days_count'] ?? [];
         $amountTexts = $post['amount_text'] ?? [];
         $stockStatuses = $post['stock_status'] ?? [];
-        $medStmt = $pdo->prepare('INSERT INTO prescription_medications (prescription_id, sort_order, drug_name, usage_text, days_count, amount_text, stock_status, needs_check)
-                                  VALUES (:prescription_id, :sort_order, :drug_name, :usage_text, :days_count, :amount_text, :stock_status, :needs_check)');
+
+        $medOptionalColumns = [];
+        foreach (['generic_name','brand_name','raw_drug_text','ai_drug_name','ai_generic_name','ai_brand_name','drug_name_relation_type'] as $column) {
+            if (Db::columnExists($pdo, 'prescription_medications', $column)) {
+                $medOptionalColumns[] = $column;
+            }
+        }
+        $medColumns = array_merge(['prescription_id','sort_order','drug_name','usage_text','days_count','amount_text','stock_status','needs_check'], $medOptionalColumns);
+        $medSql = 'INSERT INTO prescription_medications (' . implode(', ', $medColumns) . ') VALUES (:' . implode(', :', $medColumns) . ')';
+        $medStmt = $pdo->prepare($medSql);
+
         foreach ($drugNames as $i => $drugName) {
             $drugName = trim((string)$drugName);
-            if ($drugName === '') {
+            $genericName = trim((string)($genericNames[$i] ?? ''));
+            $brandName = trim((string)($brandNames[$i] ?? ''));
+            $rawDrugText = trim((string)($rawDrugTexts[$i] ?? ''));
+            if ($rawDrugText === '') {
+                $rawDrugText = implode("
+", array_values(array_filter([$drugName, $genericName, $brandName], static fn($v) => trim((string)$v) !== '')));
+            }
+            if ($drugName === '' && $genericName === '' && $brandName === '' && $rawDrugText === '') {
                 continue;
+            }
+            if ($drugName === '') {
+                $drugName = $brandName !== '' ? $brandName : $genericName;
             }
             $days = (int)($daysCounts[$i] ?? 0);
             $status = $stockStatuses[$i] ?? 'unknown';
-            $medStmt->execute([
+            $relation = (string)($relationTypes[$i] ?? 'unknown');
+            if (!in_array($relation, ['single','generic_brand_pair','multiple_candidates','unknown'], true)) {
+                $relation = 'unknown';
+            }
+
+            $params = [
                 ':prescription_id' => $prescriptionId,
                 ':sort_order' => $i + 1,
                 ':drug_name' => $drugName,
@@ -248,7 +341,25 @@ function create_prescription_from_post(array $user, array $post): int
                 ':amount_text' => trim((string)($amountTexts[$i] ?? '')) !== '' ? trim((string)$amountTexts[$i]) : ($days ? $days . '日分' : null),
                 ':stock_status' => in_array($status, ['adopted','in_stock','low_stock','not_stocked','unknown'], true) ? $status : 'unknown',
                 ':needs_check' => $status === 'low_stock' ? 1 : 0,
-            ]);
+            ];
+            foreach ($medOptionalColumns as $column) {
+                $params[':' . $column] = match ($column) {
+                    'generic_name' => $genericName !== '' ? $genericName : null,
+                    'brand_name' => $brandName !== '' ? $brandName : null,
+                    'raw_drug_text' => $rawDrugText !== '' ? $rawDrugText : null,
+                    'ai_drug_name' => trim((string)($aiDrugNames[$i] ?? '')) ?: null,
+                    'ai_generic_name' => trim((string)($aiGenericNames[$i] ?? '')) ?: null,
+                    'ai_brand_name' => trim((string)($aiBrandNames[$i] ?? '')) ?: null,
+                    'drug_name_relation_type' => $relation,
+                    default => null,
+                };
+            }
+            $medStmt->execute($params);
+        }
+
+        $drugLearningRows = medication_name_learning_rows_from_post($post);
+        if ($drugLearningRows) {
+            (new PrescriptionKnowledgeService())->saveDrugNameLearningEvents($parseJobId, $tenantId, $prescriptionId, $drugLearningRows);
         }
         $selectedFields = selected_prescription_fields_from_post($post);
         save_prescription_selected_fields($pdo, $tenantId, $prescriptionId, $parseJobId, $selectedFields);
