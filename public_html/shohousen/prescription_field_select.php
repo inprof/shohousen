@@ -103,6 +103,34 @@ function find_original_med_value(array $originals, int $medIndex, string $type, 
     return ['value' => $fallback, 'index' => null];
 }
 
+
+function original_value_for(array $originals, array $keys, array $labels, string $fallback): string
+{
+    foreach ($keys as $key) {
+        foreach ($originals as $row) {
+            if ((string)($row['key'] ?? '') === $key && trim((string)($row['value'] ?? '')) !== '') {
+                return trim((string)$row['value']);
+            }
+        }
+    }
+    foreach ($labels as $label) {
+        foreach ($originals as $row) {
+            if ((string)($row['label'] ?? '') === $label && trim((string)($row['value'] ?? '')) !== '') {
+                return trim((string)$row['value']);
+            }
+        }
+    }
+    return $fallback;
+}
+
+function is_output_selectable_field_key(string $key): bool
+{
+    return !preg_match('/\.(generic_name|brand_name|raw_drug_text|relation_type)$/', $key)
+        && !str_contains($key, 'raw_drug_text')
+        && !str_contains($key, 'drug_name_relation')
+        && !str_contains($key, 'name_relation');
+}
+
 /** @return array<string,mixed> */
 function make_field_row(string $key, string $label, string $group, string $value, string $aiValue, string $section, ?float $confidence, bool $needsHumanCheck, array $preferences, bool $defaultSelected = true): array
 {
@@ -123,6 +151,17 @@ function make_field_row(string $key, string $label, string $group, string $value
 }
 
 $originals = original_dynamic_fields_from_post($post);
+$confirmedValues = [
+    'patient_name' => original_value_for($originals, ['patient.name'], ['患者名', '氏名'], select_string($post, 'patient_name')),
+    'gender' => original_value_for($originals, ['patient.gender'], ['性別'], select_string($post, 'gender')),
+    'birth_date' => original_value_for($originals, ['patient.birth_date'], ['生年月日'], select_string($post, 'birth_date')),
+    'insurance_no' => original_value_for($originals, ['insurance.insurance_no'], ['保険者番号'], select_string($post, 'insurance_no')),
+    'insured_symbol_number' => original_value_for($originals, ['insurance.insured_symbol_number'], ['記号番号', '被保険者証・被保険者手帳の記号番号'], select_string($post, 'insured_symbol_number')),
+    'copay_rate' => original_value_for($originals, ['insurance.copay_rate'], ['負担割合'], select_string($post, 'copay_rate')),
+    'issued_on' => original_value_for($originals, ['prescription.issued_on'], ['処方箋発行日', '交付年月日'], select_string($post, 'issued_on')),
+    'medical_institution_code' => original_value_for($originals, ['medical_institution.code'], ['医療機関コード'], select_string($post, 'medical_institution_code')),
+    'medical_institution_name' => original_value_for($originals, ['medical_institution.name'], ['医療機関名', '保険医療機関の所在地及び名称'], select_string($post, 'medical_institution_name')),
+];
 $usedOriginalIndexes = [];
 $rows = [];
 
@@ -138,7 +177,7 @@ $fixedMap = [
     ['medical_institution.name', '医療機関名', 'medical_institution', 'medical_institution_name', 'ai_medical_institution_name'],
 ];
 foreach ($fixedMap as [$key, $label, $group, $postKey, $aiKey]) {
-    $value = select_string($post, $postKey);
+    $value = trim((string)($confirmedValues[$postKey] ?? select_string($post, $postKey)));
     $aiValue = select_string($post, $aiKey);
     if ($value === '' && $aiValue === '') {
         continue;
@@ -265,6 +304,10 @@ try {
     $learningSaved = false;
 }
 
+// 使用項目選択は拠点運用・QR/後続出力用。薬品名元テキストや一般名/商品名候補は
+// 補助学習DBには保存するが、使う/使わないの選択対象には出さない。
+$rows = array_values(array_filter($rows, static fn(array $row): bool => is_output_selectable_field_key((string)($row['key'] ?? ''))));
+
 View::header('使用項目の選択', ['styles' => ['/assets/css/prescription_field_select.css']]);
 ?>
 <section class="page-title">
@@ -284,7 +327,7 @@ View::header('使用項目の選択', ['styles' => ['/assets/css/prescription_fi
   <input type="hidden" name="ai_confidence" value="<?= h(select_string($post, 'ai_confidence')) ?>">
 
   <?php foreach (['patient_name','gender','birth_date','insurance_no','insured_symbol_number','copay_rate','issued_on','medical_institution_code','medical_institution_name'] as $name): ?>
-    <input type="hidden" name="<?= h($name) ?>" value="<?= h(select_string($post, $name)) ?>">
+    <input type="hidden" name="<?= h($name) ?>" value="<?= h((string)($confirmedValues[$name] ?? select_string($post, $name))) ?>">
   <?php endforeach; ?>
 
   <?php for ($i = 0; $i < $medCount; $i++): ?>
@@ -323,9 +366,9 @@ View::header('使用項目の選択', ['styles' => ['/assets/css/prescription_fi
   <section class="field-selection-summary">
     <h2>確定データ概要</h2>
     <div class="summary-grid compact">
-      <div><span>患者名</span><strong><?= h(select_string($post, 'patient_name')) ?></strong></div>
-      <div><span>保険者番号</span><strong><?= h(select_string($post, 'insurance_no')) ?></strong></div>
-      <div><span>医療機関</span><strong><?= h(select_string($post, 'medical_institution_name')) ?></strong></div>
+      <div><span>患者名</span><strong><?= h((string)($confirmedValues['patient_name'] ?? '')) ?></strong></div>
+      <div><span>保険者番号</span><strong><?= h((string)($confirmedValues['insurance_no'] ?? '')) ?></strong></div>
+      <div><span>医療機関</span><strong><?= h((string)($confirmedValues['medical_institution_name'] ?? '')) ?></strong></div>
       <div><span>処方薬</span><strong><?= h((string)$medCount) ?>件</strong></div>
     </div>
   </section>
