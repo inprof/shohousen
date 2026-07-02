@@ -227,7 +227,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     <img src="<?= h(app_url('/prescription_job_image.php?job_id=' . (string)$jobId)) ?>" alt="撮影した処方箋画像" loading="lazy">
   </section>
 <?php endif; ?>
-<form class="card result-card" method="post" action="<?= h(app_url('/prescription_field_select.php')) ?>">
+<form class="card result-card" method="post" action="<?= h(app_url('/prescription_confirm.php')) ?>">
   <?= Csrf::field() ?>
   <input type="hidden" name="parse_job_id" value="<?= h((string)$jobId) ?>">
   <input type="hidden" name="ai_confidence" value="<?= h((string)($data['overall_confidence'] ?? '')) ?>">
@@ -254,8 +254,8 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
 
   <div class="confirm-flow-note">
     <span class="flow-step active">1. 読み取り項目を修正</span>
-    <span class="flow-step">2. 使用項目を選択</span>
-    <span class="flow-step">3. DB保存</span>
+    <span class="flow-step">2. DB保存</span>
+    <span class="flow-step">3. 使用項目を選択</span>
     <span class="flow-step">4. QR作成</span>
   </div>
 
@@ -440,9 +440,42 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     </div>
   </template>
 
+  <section class="prescription-confirm-preview" aria-label="修正内容の確認プレビュー">
+    <div class="preview-head">
+      <h2>修正内容の確認プレビュー</h2>
+      <p>上で修正した内容を、保存前に処方箋風にまとめて確認します。入力を変更すると自動で反映されます。</p>
+    </div>
+    <div class="preview-sheet">
+      <div class="preview-title">処 方 箋</div>
+      <div class="preview-grid">
+        <div><span>患者氏名</span><strong data-preview="patient.name"><?= h((string)($patient['name'] ?? '')) ?></strong></div>
+        <div><span>性別</span><strong data-preview="patient.gender"><?= h((string)($patient['gender'] ?? '')) ?></strong></div>
+        <div><span>生年月日</span><strong data-preview="patient.birth_date"><?= h((string)($patient['birth_date'] ?? '')) ?></strong></div>
+        <div><span>保険者番号</span><strong data-preview="insurance.insurance_no"><?= h((string)($insurance['insurance_no'] ?? '')) ?></strong></div>
+        <div><span>記号番号</span><strong data-preview="insurance.insured_symbol_number"><?= h((string)($insurance['insured_symbol_number'] ?? '')) ?></strong></div>
+        <div><span>交付年月日</span><strong data-preview="prescription.issued_on"><?= h((string)($prescription['issued_on'] ?? '')) ?></strong></div>
+        <div><span>医療機関コード</span><strong data-preview="medical_institution.code"><?= h((string)($medical['code'] ?? '')) ?></strong></div>
+        <div><span>医療機関名</span><strong data-preview="medical_institution.name"><?= h((string)($medical['name'] ?? '')) ?></strong></div>
+      </div>
+      <div class="preview-medications">
+        <h3>処方薬</h3>
+        <div data-preview-meds>
+          <?php foreach ($medications as $i => $med): ?>
+            <div class="preview-med-row">
+              <strong><?= h((string)($med['drug_name'] ?? '')) ?></strong>
+              <span><?= h((string)($med['usage_text'] ?? '')) ?></span>
+              <span><?= h((string)($med['days_count'] ?? '')) ?>日</span>
+              <span><?= h((string)($med['amount_text'] ?? '')) ?></span>
+            </div>
+          <?php endforeach; ?>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <div class="button-row end sticky-save-actions">
     <a class="btn ghost" href="<?= h(app_url('/prescription_scan.php')) ?>">再撮影</a>
-    <button class="btn primary" type="submit">使用項目の選択へ進む</button>
+    <button class="btn primary" type="submit">修正内容をDB保存して次へ</button>
   </div>
 </form>
 <script>
@@ -462,9 +495,53 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     });
   }
 
+  function syncPreview() {
+    syncFixedHiddenFields();
+    document.querySelectorAll('[data-preview]').forEach(function (node) {
+      var key = node.getAttribute('data-preview');
+      var hidden = document.querySelector('[data-fixed-field="' + key + '"]');
+      node.textContent = hidden && hidden.value ? hidden.value : '—';
+    });
+
+    var meds = document.querySelector('[data-preview-meds]');
+    if (meds) {
+      meds.innerHTML = '';
+      document.querySelectorAll('[data-med-list] .ocr-med-row').forEach(function (row) {
+        var drug = row.querySelector('[name="drug_name[]"]')?.value || '';
+        var usage = row.querySelector('[name="usage_text[]"]')?.value || '';
+        var days = row.querySelector('[name="days_count[]"]')?.value || '';
+        var amount = row.querySelector('[name="amount_text[]"]')?.value || '';
+        if (!drug && !usage && !days && !amount) return;
+        var div = document.createElement('div');
+        div.className = 'preview-med-row';
+        div.innerHTML = '<strong></strong><span></span><span></span><span></span>';
+        div.children[0].textContent = drug || '薬品名未入力';
+        div.children[1].textContent = usage || '用法未入力';
+        div.children[2].textContent = days ? days + '日' : '日数未入力';
+        div.children[3].textContent = amount || '';
+        meds.appendChild(div);
+      });
+      if (!meds.children.length) {
+        meds.innerHTML = '<p class="muted">処方薬が未入力です。</p>';
+      }
+    }
+  }
+
+  document.addEventListener('input', function (event) {
+    if (event.target instanceof HTMLElement && event.target.closest('.result-card')) {
+      syncPreview();
+    }
+  });
+  document.addEventListener('change', function (event) {
+    if (event.target instanceof HTMLElement && event.target.closest('.result-card')) {
+      syncPreview();
+    }
+  });
+
   document.addEventListener('submit', function (event) {
     if (event.target instanceof HTMLFormElement && event.target.classList.contains('result-card')) {
       syncFixedHiddenFields();
+      syncPreview();
     }
   });
 
@@ -514,6 +591,8 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       event.preventDefault();
     }
   });
+
+  syncPreview();
 })();
 </script>
 <?php View::footer(); ?>

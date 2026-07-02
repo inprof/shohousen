@@ -114,6 +114,22 @@ function selected_prescription_fields_from_post(array $post): array
     $outputCandidates = $post['dynamic_field_output_candidate'] ?? [];
     $needsChecks = $post['dynamic_field_needs_human_check'] ?? [];
 
+    // 解析結果確認画面では、まだ「使う/使わない」を選ばない。
+    // その段階では original_dynamic_* として送られるため、ここで保存用の形式へ変換する。
+    // is_selected/include_for_output は false にして、次の使用項目選択画面で更新する。
+    if (!$keys && !empty($post['original_dynamic_key'])) {
+        $keys = $post['original_dynamic_key'] ?? [];
+        $labels = $post['original_dynamic_label'] ?? [];
+        $groups = $post['original_dynamic_group'] ?? [];
+        $values = $post['original_dynamic_value'] ?? [];
+        $aiValues = $post['original_dynamic_ai_value'] ?? [];
+        $sections = $post['original_dynamic_source_section'] ?? [];
+        $confidences = $post['original_dynamic_confidence'] ?? [];
+        $needsChecks = $post['original_dynamic_needs_human_check'] ?? [];
+        $selected = [];
+        $outputCandidates = [];
+    }
+
     $rows = [];
     foreach ($keys as $i => $key) {
         $key = preg_replace('/[^a-zA-Z0-9_.-]+/', '_', trim((string)$key)) ?: ('field_' . $i);
@@ -182,6 +198,78 @@ function save_prescription_selected_fields(PDO $pdo, int $tenantId, int $prescri
             ':include_for_output' => !empty($row['include_for_output']) ? 1 : 0,
             ':display_order' => (int)$row['display_order'],
         ]);
+    }
+}
+
+
+/**
+ * 選択項目のAI値・人間修正値から、補助学習DBに渡す行を作る。
+ * 使用/未使用の判断は拠点運用なので、ここでは学習スコアに含めない。
+ *
+ * @return array<int,array<string,mixed>>
+ */
+function correction_learning_rows_from_selected_fields(array $rows): array
+{
+    return array_map(static function (array $row): array {
+        return [
+            'field_key' => $row['field_key'] ?? '',
+            'field_label' => $row['field_label'] ?? '',
+            'field_group' => $row['field_group'] ?? 'other',
+            'source_ai_value' => $row['source_ai_value'] ?? '',
+            'field_value' => $row['field_value'] ?? '',
+            'confidence' => $row['confidence'] ?? null,
+            'needs_human_check' => !empty($row['needs_human_check']),
+        ];
+    }, $rows);
+}
+
+/**
+ * 使用項目選択画面で選ばれた「使う/使わない」を、既に保存済みの読み取り項目へ反映する。
+ */
+function update_prescription_selected_fields_from_post(int $tenantId, int $prescriptionId, array $post): void
+{
+    $pdo = Db::branch();
+    if (!Db::tableExists($pdo, 'prescription_selected_fields')) {
+        return;
+    }
+
+    $ids = $post['dynamic_field_id'] ?? [];
+    $keys = $post['dynamic_field_key'] ?? [];
+    $values = $post['dynamic_field_value'] ?? [];
+    $selected = $post['dynamic_field_selected'] ?? [];
+    $outputCandidates = $post['dynamic_field_output_candidate'] ?? [];
+
+    $stmtById = $pdo->prepare('UPDATE prescription_selected_fields
+        SET field_value = :field_value,
+            is_selected = :is_selected,
+            include_for_output = :include_for_output,
+            updated_at = NOW()
+        WHERE id = :id AND prescription_id = :prescription_id AND tenant_id = :tenant_id');
+
+    $stmtByKey = $pdo->prepare('UPDATE prescription_selected_fields
+        SET field_value = :field_value,
+            is_selected = :is_selected,
+            include_for_output = :include_for_output,
+            updated_at = NOW()
+        WHERE prescription_id = :prescription_id AND tenant_id = :tenant_id AND field_key = :field_key');
+
+    foreach ($keys as $i => $key) {
+        $fieldValue = trim((string)($values[$i] ?? ''));
+        $isSelected = isset($selected[$i]) && (string)$selected[$i] === '1';
+        $includeForOutput = $isSelected && (isset($outputCandidates[$i]) ? (string)$outputCandidates[$i] === '1' : true);
+        $params = [
+            ':field_value' => $fieldValue,
+            ':is_selected' => $isSelected ? 1 : 0,
+            ':include_for_output' => $includeForOutput ? 1 : 0,
+            ':prescription_id' => $prescriptionId,
+            ':tenant_id' => $tenantId,
+        ];
+        $id = (int)($ids[$i] ?? 0);
+        if ($id > 0) {
+            $stmtById->execute($params + [':id' => $id]);
+        } else {
+            $stmtByKey->execute($params + [':field_key' => mb_substr((string)$key, 0, 120)]);
+        }
     }
 }
 
@@ -365,6 +453,21 @@ function create_prescription_from_post(array $user, array $post): int
 
         if ($selectedFields) {
             (new PrescriptionKnowledgeService())->saveFieldObservations($parseJobId, $tenantId, $prescriptionId, $selectedFields);
+        }
+
+        // 解析結果確認画面で人間修正が確定した時点で、補助学習DBへ反映する。
+        // 使用項目の選択は拠点ごとの運用設定なので、補助学習スコアには使わない。
+        try {
+            $knowledge = new PrescriptionKnowledgeService();
+            if ($selectedFields) {
+                $knowledge->saveConfirmedCorrectionLearning($parseJobId, $tenantId, correction_learning_rows_from_selected_fields($selectedFields));
+            }
+            $drugLearningRows = medication_name_learning_rows_from_post($post);
+            if ($drugLearningRows) {
+                $knowledge->saveDrugNameLearningEvents($parseJobId, $tenantId, $prescriptionId, $drugLearningRows);
+            }
+        } catch (Throwable) {
+            // 補助学習DBの一時不調で拠点DBへの確定保存を止めない。
         }
 
         if ($parseJobId) {

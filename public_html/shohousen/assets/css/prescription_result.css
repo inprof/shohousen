@@ -238,3 +238,81 @@
     grid-column: span 1;
   }
 }
+
+/* 修正内容の保存前確認プレビュー */
+.prescription-confirm-preview {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+}
+.preview-head h2 {
+  margin: 0 0 6px;
+}
+.preview-head p {
+  margin: 0 0 14px;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.preview-sheet {
+  border: 2px solid #1f2937;
+  border-radius: 8px;
+  background: #fff;
+  padding: 18px;
+}
+.preview-title {
+  text-align: center;
+  font-size: 24px;
+  font-weight: 800;
+  letter-spacing: .45em;
+  margin-bottom: 14px;
+}
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border-top: 1px solid #9ca3af;
+  border-left: 1px solid #9ca3af;
+}
+.preview-grid > div {
+  min-height: 52px;
+  padding: 8px 10px;
+  border-right: 1px solid #9ca3af;
+  border-bottom: 1px solid #9ca3af;
+}
+.preview-grid span {
+  display: block;
+  color: #667085;
+  font-size: 12px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.preview-grid strong {
+  display: block;
+  word-break: break-word;
+}
+.preview-medications {
+  margin-top: 18px;
+}
+.preview-medications h3 {
+  margin: 0 0 8px;
+}
+.preview-med-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 2fr) minmax(140px, 1fr) 80px minmax(100px, 1fr);
+  gap: 8px;
+  padding: 8px 0;
+  border-bottom: 1px solid #e5e7eb;
+}
+.preview-med-row span,
+.preview-med-row strong {
+  word-break: break-word;
+}
+@media (max-width: 760px) {
+  .preview-grid,
+  .preview-med-row {
+    grid-template-columns: 1fr;
+  }
+  .preview-title {
+    font-size: 20px;
+    letter-spacing: .25em;
+  }
+}
