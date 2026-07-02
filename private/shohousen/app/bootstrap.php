@@ -69,7 +69,9 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
 require_once __DIR__ . '/Db.php';
 require_once __DIR__ . '/Csrf.php';
 require_once __DIR__ . '/Auth.php';
+require_once __DIR__ . '/SuperAdminAuth.php';
 require_once __DIR__ . '/View.php';
+require_once __DIR__ . '/SuperAdminView.php';
 require_once __DIR__ . '/Repositories.php';
 require_once __DIR__ . '/OpenAiPrescriptionClient.php';
 require_once __DIR__ . '/PrescriptionImagePreprocessor.php';
