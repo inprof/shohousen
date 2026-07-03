@@ -40,13 +40,67 @@ if (!$prescription) {
 }
 
 $selectedFields = ensure_prescription_selected_fields_for_prescription($tenantId, $prescriptionId, $prescription);
-$rows = array_values(array_filter($selectedFields, static function (array $row): bool {
+
+function field_select_canonical_key(array $row): string
+{
+    $key = preg_replace('/[^a-zA-Z0-9_.-]+/', '_', trim((string)($row['field_key'] ?? ''))) ?: 'field';
+    $label = (string)($row['field_label'] ?? '');
+    $group = (string)($row['field_group'] ?? 'other');
+    $map = [
+        'patient_name' => 'patient.name',
+        'patient_birth_date' => 'patient.birth_date',
+        'patient_gender' => 'patient.gender',
+        'insurance_no' => 'insurance.insurance_no',
+        'insured_symbol_number' => 'insurance.insured_symbol_number',
+        'copay_rate' => 'insurance.copay_rate',
+        'issued_on' => 'prescription.issued_on',
+        'expires_on' => 'prescription.expires_on',
+        'medical_institution_code' => 'medical_institution.code',
+        'medical_institution_name' => 'medical_institution.name',
+        'doctor_name' => 'medical_institution.doctor_name',
+        'medical_institution_phone' => 'medical_institution.phone',
+    ];
+    if (isset($map[$key])) {
+        return $map[$key];
+    }
+    if ($group === 'medical_institution' && str_contains($label, '医療機関名')) {
+        return 'medical_institution.name';
+    }
+    return $key;
+}
+
+function field_select_confidence_label(mixed $confidence): string
+{
+    if (!is_numeric($confidence)) {
+        return '実績信頼度 未評価';
+    }
+    $value = (float)$confidence;
+    if ($value >= 0.0 && $value <= 1.0) {
+        $value *= 100.0;
+    }
+    $value = min(max($value, 0.0), 25.0);
+    return '確認スコア ' . rtrim(rtrim((string)round($value, 1), '0'), '.') . '%';
+}
+$rows = [];
+$seenDisplayKeys = [];
+foreach ($selectedFields as $row) {
     $key = (string)($row['field_key'] ?? '');
-    return !preg_match('/\.(generic_name|brand_name|raw_drug_text|relation_type)$/', $key)
-        && !str_contains($key, 'raw_drug_text')
-        && !str_contains($key, 'drug_name_relation')
-        && !str_contains($key, 'name_relation');
-}));
+    $group = (string)($row['field_group'] ?? '');
+    if ($group === 'medication'
+        || preg_match('/\.(generic_name|brand_name|raw_drug_text|relation_type)$/', $key)
+        || str_contains($key, 'raw_drug_text')
+        || str_contains($key, 'drug_name_relation')
+        || str_contains($key, 'name_relation')) {
+        continue;
+    }
+    $displayKey = field_select_canonical_key($row);
+    if (isset($seenDisplayKeys[$displayKey])) {
+        continue;
+    }
+    $seenDisplayKeys[$displayKey] = true;
+    $row['field_key'] = $displayKey;
+    $rows[] = $row;
+}
 
 $groupOrder = array_keys($fieldGroupLabels);
 usort($rows, static function (array $a, array $b) use ($groupOrder): int {
@@ -144,7 +198,7 @@ View::header('使用項目の選択', ['styles' => ['/assets/css/prescription_fi
             <div class="field-meta">
               <span>DB保存済み</span>
               <?php if (!empty($field['source_section'])): ?><span><?= h((string)$field['source_section']) ?></span><?php endif; ?>
-              <?php if (($field['confidence'] ?? null) !== null && $field['confidence'] !== ''): ?><span>信頼度 <?= h((string)round((float)$field['confidence'], 1)) ?>%</span><?php endif; ?>
+              <span><?= h(field_select_confidence_label($field['confidence'] ?? null)) ?></span>
               <?php if ($needs): ?><span class="attention">修正済み/要確認</span><?php endif; ?>
             </div>
           </div>

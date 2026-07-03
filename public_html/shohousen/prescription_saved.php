@@ -30,7 +30,7 @@ View::header('確定保存完了');
   <h2>保存された処方薬</h2>
   <div class="table-card saved-meds-table">
     <table class="data-table compact">
-      <thead><tr><th>#</th><th>薬品名</th><th>一般名</th><th>商品名</th><th>用法</th><th>日数</th><th>総量/備考</th></tr></thead>
+      <thead><tr><th>#</th><th>薬品名</th><th>一般名</th><th>商品名</th><th>用量</th><th>用法</th><th>日数</th><th>総量/備考</th></tr></thead>
       <tbody>
       <?php foreach (($prescription['medications'] ?? []) as $med): ?>
         <tr>
@@ -38,6 +38,7 @@ View::header('確定保存完了');
           <td><?= h((string)$med['drug_name']) ?></td>
           <td><?= h((string)($med['generic_name'] ?? '')) ?></td>
           <td><?= h((string)($med['brand_name'] ?? '')) ?></td>
+          <td><?= h((string)($med['dose_text'] ?? '')) ?></td>
           <td><?= h((string)($med['usage_text'] ?? '')) ?></td>
           <td><?= h((string)($med['days_count'] ?? '')) ?></td>
           <td><?= h((string)($med['amount_text'] ?? '')) ?></td>
@@ -59,7 +60,7 @@ View::header('確定保存完了');
             <td><?= h((string)$field['field_label']) ?></td>
             <td><?= h((string)($field['field_value'] ?? '')) ?></td>
             <td><?= h((string)$field['field_group']) ?></td>
-            <td><?= h((string)($field['confidence'] ?? '')) ?></td>
+            <td><?= ($field['confidence'] ?? '') !== '' ? '確認済み' : '未評価' ?></td>
           </tr>
         <?php endforeach; ?>
         </tbody>

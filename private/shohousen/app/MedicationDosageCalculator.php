@@ -91,12 +91,8 @@ final class MedicationDosageCalculator
         if (preg_match('/^\d+(?:\.\d+)?日分$/u', $current) === 1) {
             return true;
         }
-        $cur = self::splitNumericUnit($current);
-        $calc = self::splitNumericUnit($calculated);
-        if ($cur !== null && $calc !== null && $cur['unit'] !== $calc['unit']) {
-            // 薬品名の規格量（例: 5mg, 0.05mg）が総量欄へ入ったケースを補正する。
-            return true;
-        }
+        // 200g / 100mL など、薬剤師が入力した可能性のある総量は勝手に上書きしない。
+        // AIの候補が不十分な段階で自動置換すると、根拠のない数量が保存されるため。
         return false;
     }
 
@@ -114,7 +110,7 @@ final class MedicationDosageCalculator
         if (is_numeric($daysValue) && (int)$daysValue > 0) {
             return (int)$daysValue;
         }
-        if (preg_match('/(\d+)\s*日\s*分?/u', $usageText, $m) === 1) {
+        if (preg_match('/(\d+)\s*日\s*分/u', $usageText, $m) === 1) {
             return (int)$m[1];
         }
         return null;
@@ -129,6 +125,9 @@ final class MedicationDosageCalculator
                 continue;
             }
             if (preg_match('/(\d+(?:\.\d+)?)\s*(錠| tablet|tablets|tab|カプセル|cap|capsule|包|袋|mL|ml|cc|g|mg|滴|枚|本|個)/iu', $source, $m) === 1) {
+                if (self::isLikelyDrugStrength((string)$m[1], (string)$m[2], $source, $drugName)) {
+                    continue;
+                }
                 return ['value' => (float)$m[1], 'unit' => self::normalizeUnit((string)$m[2])];
             }
             // 「1×朝食後」のように単位が省略されている場合は、薬品名の剤形から補う。
@@ -140,6 +139,21 @@ final class MedicationDosageCalculator
             }
         }
         return null;
+    }
+
+    private static function isLikelyDrugStrength(string $number, string $unit, string $source, string $drugName): bool
+    {
+        $unit = self::normalizeUnit($unit);
+        if (!in_array($unit, ['mg', 'g'], true)) {
+            return false;
+        }
+        $sourceCompact = preg_replace('/\s+/u', '', self::normalizeText($source)) ?? self::normalizeText($source);
+        $drugCompact = preg_replace('/\s+/u', '', self::normalizeText($drugName)) ?? self::normalizeText($drugName);
+        $token = $number . $unit;
+        if (preg_match('/1回|一回|毎回|使用量|塗布量/u', $sourceCompact) === 1) {
+            return false;
+        }
+        return $sourceCompact === $token && str_contains($drugCompact, $token);
     }
 
     private static function inferUnitFromDrugName(string $drugName): string
@@ -156,6 +170,9 @@ final class MedicationDosageCalculator
     {
         $text = self::normalizeText($usageText);
         if ($text === '') {
+            return null;
+        }
+        if (preg_match('/1\s*日\s*\d+(?:\.\d+)?\s*[〜～~\-]\s*\d+(?:\.\d+)?\s*回/u', $text) === 1) {
             return null;
         }
         if (preg_match('/1\s*日\s*(\d+(?:\.\d+)?)\s*回/u', $text, $m) === 1) {
@@ -197,16 +214,6 @@ final class MedicationDosageCalculator
             'ml', 'cc' => 'mL',
             default => $u,
         };
-    }
-
-    /** @return array{number:float,unit:string}|null */
-    private static function splitNumericUnit(string $text): ?array
-    {
-        $text = self::normalizeText($text);
-        if (preg_match('/^(\d+(?:\.\d+)?)\s*(錠|カプセル|包|袋|mL|ml|cc|g|mg|滴|枚|本|個)$/iu', $text, $m) !== 1) {
-            return null;
-        }
-        return ['number' => (float)$m[1], 'unit' => self::normalizeUnit((string)$m[2])];
     }
 
     private static function formatNumber(float $number): string

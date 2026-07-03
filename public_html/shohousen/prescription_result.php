@@ -67,9 +67,30 @@ function normalize_review_key(string $key): string
     return preg_replace('/[^a-zA-Z0-9_.-]+/', '_', trim($key)) ?: 'field';
 }
 
+function standard_review_key_alias(string $key): string
+{
+    $normalized = str_replace('-', '_', normalize_review_key($key));
+    return match ($normalized) {
+        'patient_name', 'name', 'patient.name' => 'patient.name',
+        'patient_kana', 'kana', 'patient.kana' => 'patient.kana',
+        'patient_birth_date', 'birth_date', 'patient.birth_date' => 'patient.birth_date',
+        'patient_gender', 'gender', 'patient.gender' => 'patient.gender',
+        'insurance_no', 'insurer_number', 'insurance.insurance_no' => 'insurance.insurance_no',
+        'insured_symbol_number', 'insurance_symbol_number', 'insurance.insured_symbol_number' => 'insurance.insured_symbol_number',
+        'copay_rate', 'copay_ratio', 'insurance.copay_rate' => 'insurance.copay_rate',
+        'issued_on', 'prescription_issued_on', 'prescription.issued_on' => 'prescription.issued_on',
+        'expires_on', 'valid_until', 'prescription.expires_on', 'prescription.valid_until' => 'prescription.expires_on',
+        'medical_institution_code', 'institution_code', 'medical_institution.code' => 'medical_institution.code',
+        'medical_institution_name', 'medical_name', 'institution_name', 'medical_institution.name' => 'medical_institution.name',
+        'doctor_name', 'medical_institution.doctor_name' => 'medical_institution.doctor_name',
+        'medical_institution_phone', 'phone', 'medical_institution.phone' => 'medical_institution.phone',
+        default => $normalized,
+    };
+}
+
 function canonical_review_key(array $field): string
 {
-    $key = normalize_review_key((string)($field['field_key'] ?? ''));
+    $key = standard_review_key_alias((string)($field['field_key'] ?? ''));
     $label = (string)($field['field_label'] ?? '');
     $group = (string)($field['field_group'] ?? 'other');
     $target = $label . ' ' . $key;
@@ -91,7 +112,7 @@ function canonical_review_key(array $field): string
     }
     if ($group === 'medical_institution') {
         if (str_contains($target, '医療機関コード')) return 'medical_institution.code';
-        if (str_contains($target, '医療機関') && (str_contains($target, '名称') || str_contains($target, '所在'))) return 'medical_institution.name';
+        if (str_contains($target, '医療機関名') || (str_contains($target, '医療機関') && (str_contains($target, '名称') || str_contains($target, '所在')))) return 'medical_institution.name';
         if (str_contains($target, '医師')) return 'medical_institution.doctor_name';
         if (str_contains($target, '電話')) return 'medical_institution.phone';
     }
@@ -112,6 +133,22 @@ function is_learning_only_review_field(array $field): bool
         }
     }
     return false;
+}
+
+function review_confidence_badge(mixed $confidence, array $field): string
+{
+    $raw = ocr_confidence_percent($confidence);
+    if ($raw === null) {
+        return '実績信頼度 未評価';
+    }
+    $source = (string)($field['source'] ?? '');
+    $sourceSection = (string)($field['source_section'] ?? '');
+    $needs = !empty($field['needs_human_check']);
+    $isFirstPass = $needs || in_array($source, ['normalized', 'structured_field', 'ai'], true) || str_contains($sourceSection, '標準項目');
+    // ここで出すのはAIの自己申告値ではなく、人間確認前の確認優先度。
+    // 実績学習が十分に溜まるまでは高い数字を出さず、過信を防ぐ。
+    $display = $isFirstPass ? min($raw, 25.0) : min($raw, 60.0);
+    return '確認スコア ' . rtrim(rtrim((string)round($display, 1), '0'), '.') . '%';
 }
 
 /** @param array<string,array<string,mixed>> $rows */
@@ -424,7 +461,8 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
             <div class="field-meta">
               <span>AI読取値（自動保持）: <?= h($aiValue !== '' ? $aiValue : '空欄') ?></span>
               <?php if (!empty($field['source_section'])): ?><span><?= h((string)$field['source_section']) ?></span><?php endif; ?>
-              <?php if ($confidence !== null): ?><span>信頼度 <?= h((string)round($confidence, 1)) ?>%</span><?php endif; ?>
+              <?php $confidenceBadge = review_confidence_badge($confidence, $field); ?>
+              <?php if ($confidenceBadge !== ''): ?><span><?= h($confidenceBadge) ?></span><?php endif; ?>
               <?php if (!empty($field['needs_human_check'])): ?><span class="attention">要確認</span><?php endif; ?>
             </div>
           </div>
@@ -493,7 +531,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
         <input type="hidden" name="generic_name[]" value="<?= h(medication_visible_support_value($med, 'generic_name')) ?>">
         <input type="hidden" name="brand_name[]" value="<?= h(medication_visible_support_value($med, 'brand_name')) ?>">
         <input type="hidden" name="raw_drug_text[]" value="<?= h((string)($med['raw_drug_text'] ?? ($med['drug_name'] ?? ''))) ?>">
-        <input type="hidden" name="dose_text[]" value="<?= h($doseText) ?>">
+        <label>用量（1回量）<input name="dose_text[]" value="<?= h($doseText) ?>" data-med-dose placeholder="例: 1錠 / 1回5mL"></label>
         <label>用法<input name="usage_text[]" value="<?= h((string)($med['usage_text'] ?? '')) ?>" data-med-usage></label>
         <label>日数<input type="number" name="days_count[]" value="<?= h((string)($med['days_count'] ?? '')) ?>" data-med-days></label>
         <label>総量/備考
@@ -528,7 +566,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       <input type="hidden" name="generic_name[]" value="">
       <input type="hidden" name="brand_name[]" value="">
       <input type="hidden" name="raw_drug_text[]" value="">
-      <input type="hidden" name="dose_text[]" value="">
+      <label>用量（1回量）<input name="dose_text[]" value="" data-med-dose placeholder="例: 1錠 / 1回5mL"></label>
       <label>用法<input name="usage_text[]" value="" data-med-usage></label>
       <label>日数<input type="number" name="days_count[]" value="" data-med-days></label>
       <label>総量/備考<input name="amount_text[]" value="" data-med-amount data-auto-amount="0"><small class="calculated-amount-help" data-amount-rule-note></small></label>
@@ -594,10 +632,6 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     });
   }
 
-  function normalizeTextForDetect(value) {
-    return String(value || '').replace(/\s+/g, '').toLowerCase();
-  }
-
   function normalizeDosageText(value) {
     return String(value || '')
       .replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
@@ -635,12 +669,22 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   function extractDays(daysValue, usageText) {
     var days = parseInt(normalizeDosageText(daysValue), 10);
     if (Number.isFinite(days) && days > 0) return days;
-    var m = normalizeDosageText(usageText).match(/(\d+)\s*日\s*分?/);
+    var m = normalizeDosageText(usageText).match(/(\d+)\s*日\s*分/);
     return m ? parseInt(m[1], 10) : null;
   }
 
   function isAsNeededUsage(text) {
     return /頓服|屯服|疼痛時|発作時|必要時|不眠時|便秘時|嘔気時|適宜|随時/.test(normalizeDosageText(text));
+  }
+
+  function isLikelyDrugStrength(number, unit, source, drugName) {
+    var normalizedUnit = normalizeUnit(unit);
+    if (['mg', 'g'].indexOf(normalizedUnit) < 0) return false;
+    var cleanSource = normalizeDosageText(source).replace(/\s+/g, '');
+    var cleanDrug = normalizeDosageText(drugName).replace(/\s+/g, '');
+    var token = String(number) + normalizedUnit;
+    if (/1回|一回|毎回|使用量|塗布量/.test(cleanSource)) return false;
+    return cleanSource === token && cleanDrug.indexOf(token) >= 0;
   }
 
   function extractPerDose(doseText, usageText, drugName) {
@@ -649,7 +693,10 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       var source = normalizeDosageText(sources[i]);
       if (!source) continue;
       var m = source.match(/(\d+(?:\.\d+)?)\s*(錠|tablet|tablets|tab|カプセル|cap|capsule|包|袋|mL|ml|cc|g|mg|滴|枚|本|個)/i);
-      if (m) return { value: parseFloat(m[1]), unit: normalizeUnit(m[2]) };
+      if (m) {
+        if (isLikelyDrugStrength(m[1], m[2], source, drugName)) continue;
+        return { value: parseFloat(m[1]), unit: normalizeUnit(m[2]) };
+      }
       m = source.match(/(?:^|[^0-9.])(\d+(?:\.\d+)?)\s*[x×]\s*(?:朝|昼|夕|毎食|食後|食前|就寝|寝る|起床)/);
       if (m) {
         var unit = inferUnitFromDrugName(drugName);
@@ -662,6 +709,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   function extractFrequencyPerDay(usageText) {
     var text = normalizeDosageText(usageText);
     if (!text) return null;
+    if (/1\s*日\s*\d+(?:\.\d+)?\s*[〜～~\-]\s*\d+(?:\.\d+)?\s*回/.test(text)) return null;
     var m = text.match(/1\s*日\s*(\d+(?:\.\d+)?)\s*回/);
     if (m) return parseFloat(m[1]);
     m = text.match(/分\s*(\d+(?:\.\d+)?)/);
@@ -787,55 +835,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     if (labelInput) labelInput.focus();
   }
 
-  function detectMedicationIndex(row) {
-    var label = row.querySelector('[name="original_dynamic_label[]"]')?.value || '';
-    var key = row.querySelector('[name="original_dynamic_key[]"]')?.value || '';
-    var text = label + ' ' + key;
-    var m = text.match(/(?:処方|薬|薬品|medication|med|drug)[^0-9０-９]*(\d+|[０-９]+)/i);
-    if (!m) return 0;
-    var num = String(m[1]).replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); });
-    var index = parseInt(num, 10);
-    return Number.isFinite(index) && index > 0 ? index - 1 : 0;
-  }
-
-  function detectMedicationTarget(row) {
-    var label = row.querySelector('[name="original_dynamic_label[]"]')?.value || '';
-    var key = row.querySelector('[name="original_dynamic_key[]"]')?.value || '';
-    var group = row.querySelector('[name="original_dynamic_group[]"]')?.value || '';
-    var text = normalizeTextForDetect(label + ' ' + key);
-
-    if (group !== 'medication' && !/(処方|薬品|薬剤|医薬品|用法|用量|日数|総量|数量|備考|drug|medication|usage|days|amount|qty|quantity)/i.test(text)) {
-      return '';
-    }
-    if (/(一般名|generic)/i.test(text)) return 'generic_name[]';
-    if (/(商品名|brand)/i.test(text)) return 'brand_name[]';
-    if (/(用法|服用|使用法|usage)/i.test(text)) return 'usage_text[]';
-    if (/(日数|日分|days|duration)/i.test(text)) return 'days_count[]';
-    if (/(総量|数量|用量|備考|amount|qty|quantity)/i.test(text)) return 'amount_text[]';
-    if (/(薬品名|薬剤名|医薬品名|薬名|drugname|drug_name|medication)/i.test(text)) return 'drug_name[]';
-    return '';
-  }
-
-  function ensureMedicationRow(index) {
-    var list = document.querySelector('[data-med-list]');
-    var tmpl = document.getElementById('medicationRowTemplate');
-    if (!list) return null;
-    while (list.querySelectorAll('.ocr-med-row').length <= index) {
-      if (!tmpl) break;
-      var html = tmpl.innerHTML.replace(/__NO__/g, String(list.querySelectorAll('.ocr-med-row').length + 1));
-      var wrap = document.createElement('div');
-      wrap.innerHTML = html.trim();
-      list.appendChild(wrap.firstElementChild);
-    }
-    renumberMedicationRows();
-    return list.querySelectorAll('.ocr-med-row')[index] || null;
-  }
-
-  function syncMedicationFromDynamicControl(control) {
-    // 処方薬は専用カードだけを正として修正・保存する。
-    // 動的項目から薬品カードへ同期すると二重管理になりやすいため無効化する。
-    return;
-  }
+  // 処方薬は専用カードだけを正とする。旧dynamic-field同期ロジックは二重管理の原因になるため削除。
 
   function findReviewValueByExactKey(key) {
     return document.querySelector('[data-review-value][data-field-key="' + key + '"]');
@@ -918,16 +918,13 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       if (event.target.matches('[name="amount_text[]"]')) {
         event.target.dataset.userEdited = '1';
       }
-      if (event.target.matches('[name="drug_name[]"], [name="usage_text[]"], [name="days_count[]"]')) {
+      if (event.target.matches('[name="drug_name[]"], [name="dose_text[]"], [name="usage_text[]"], [name="days_count[]"]')) {
         var medRow = event.target.closest('.ocr-med-row');
         if (medRow) {
           var amount = medRow.querySelector('[name="amount_text[]"]');
           if (amount && amount.dataset.autoAmount === '1') amount.dataset.userEdited = '0';
           recalculateMedicationRowAmount(medRow, false);
         }
-      }
-      if (event.target.matches('[data-review-value]')) {
-        syncMedicationFromDynamicControl(event.target);
       }
       syncPreview();
     }
@@ -938,9 +935,6 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       if (row) insertFieldRowIntoGroup(row, event.target.value || 'other');
     }
     if (event.target instanceof HTMLElement && event.target.closest('.result-card')) {
-      if (event.target.matches('[data-review-value]')) {
-        syncMedicationFromDynamicControl(event.target);
-      }
       syncPreview();
     }
   });
