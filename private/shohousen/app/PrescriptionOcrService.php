@@ -95,10 +95,10 @@ final class PrescriptionOcrService
             // 画像品質の補助学習DB保存失敗でOCR処理を止めない。
         }
         $layoutFingerprint = (string)($detectedTemplateMeta['layout_fingerprint'] ?? '');
-        $template = $this->knowledge->findTemplate($layoutFingerprint);
+        $template = $this->knowledge->findTemplate($layoutFingerprint, $detectedTemplateMeta);
         $templateMs = self::elapsedMs($templateStart);
         $matchedTemplateId = $template ? (int)$template['id'] : null;
-        $this->knowledge->saveTemplateMatchLog($jobId, $tenantId, $matchedTemplateId, $template ? 100.0 : null, $templateMs, $template ? 'matched' : 'unknown');
+        $this->knowledge->saveTemplateMatchLog($jobId, $tenantId, $matchedTemplateId, $template ? (float)($template['match_score'] ?? $template['template_score'] ?? 0) : null, $templateMs, $template ? 'matched' : 'unknown');
         if (!$template && $layoutFingerprint !== '') {
             $this->knowledge->saveTemplateCandidate($jobId, $tenantId, $layoutFingerprint, $detectedTemplateMeta);
         }
@@ -110,6 +110,10 @@ final class PrescriptionOcrService
             $openaiMs = self::elapsedMs($openaiStart);
             $correctionStart = microtime(true);
             $normalized = $this->correction->applyCandidates($ai['normalized']);
+            $detectedTemplateMeta['ai_layout_profile'] = $this->templateDetector->fieldProfileFromNormalized($normalized);
+            if ($layoutFingerprint !== '') {
+                $this->knowledge->saveTemplateCandidate($jobId, $tenantId, $layoutFingerprint, $detectedTemplateMeta, false);
+            }
             $correctionMs = self::elapsedMs($correctionStart);
 
             $stmt = $pdo->prepare('UPDATE prescription_parse_jobs

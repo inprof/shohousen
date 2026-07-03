@@ -3,7 +3,13 @@ declare(strict_types=1);
 
 final class PrescriptionKnowledgeService
 {
-    public function findTemplate(?string $layoutFingerprint = null): ?array
+    /**
+     * 拠点別テンプレートを検索する。
+     * 本番運用ではAI自己評価ではなく、同一拠点で人間確認が蓄積されたテンプレートだけを優先する。
+     *
+     * @param array<string,mixed>|null $detected
+     */
+    public function findTemplate(?string $layoutFingerprint = null, ?array $detected = null): ?array
     {
         if (!$layoutFingerprint) {
             return null;
@@ -19,8 +25,9 @@ final class PrescriptionKnowledgeService
                   )
                 ORDER BY
                   CASE scope_type WHEN "branch" THEN 1 WHEN "company" THEN 2 ELSE 3 END,
+                  COALESCE(template_score, 0) DESC,
                   success_count DESC,
-                  avg_correction_rate ASC,
+                  COALESCE(avg_correction_rate, 100) ASC,
                   id DESC
                 LIMIT 1';
         try {
@@ -35,11 +42,28 @@ final class PrescriptionKnowledgeService
                 return null;
             }
             $row['field_map'] = json_decode((string)($row['field_map_json'] ?? '{}'), true) ?: [];
+            $row['match_score'] = $this->scoreTemplateForDetected($row, $detected ?: []);
             return $row;
-        } catch (Throwable) {
-            // レンタルSVでknowledge DB未適用の間もOCR本体を止めない。
+        } catch (Throwable $e) {
+            $this->logLearningError('find_template', $e, ['layout_fingerprint' => $layoutFingerprint]);
             return null;
         }
+    }
+
+    /** @param array<string,mixed> $detected */
+    private function scoreTemplateForDetected(array $template, array $detected): float
+    {
+        $score = is_numeric($template['template_score'] ?? null) ? (float)$template['template_score'] : 50.0;
+        $correction = is_numeric($template['avg_correction_rate'] ?? null) ? (float)$template['avg_correction_rate'] : null;
+        if ($correction !== null) {
+            $score -= min(25.0, $correction * 0.35);
+        }
+        if (($template['layout_fingerprint'] ?? '') !== '' && ($template['layout_fingerprint'] ?? '') === ($detected['layout_fingerprint'] ?? '')) {
+            $score += 12.0;
+        }
+        $success = (int)($template['success_count'] ?? $template['sample_count'] ?? 0);
+        $score += min(18.0, $success * 3.0);
+        return round(max(0.0, min(98.0, $score)), 2);
     }
 
     /** @param array<string,mixed> $detected */
@@ -59,22 +83,33 @@ final class PrescriptionKnowledgeService
                 ':detection_ms' => $detectionMs,
                 ':result' => in_array($result, ['matched', 'unknown', 'fallback', 'failed'], true) ? $result : 'unknown',
             ]);
-        } catch (Throwable) {
-            // ナレッジDB未準備時はログだけ失敗扱いで処理継続する。
+        } catch (Throwable $e) {
+            $this->logLearningError('template_match_log', $e, ['parse_job_id' => $parseJobId, 'tenant_id' => $tenantId]);
         }
     }
 
-    /** @param array<string,mixed> $detected */
-    public function saveTemplateCandidate(int $parseJobId, int $tenantId, string $fingerprint, array $detected): void
+    /**
+     * AI解析前/解析後のレイアウト候補を保存する。
+     * $countObservation=false の場合は、同一取り込み内のAI解析後プロファイル追記として扱い、match_countは増やさない。
+     *
+     * @param array<string,mixed> $detected
+     */
+    public function saveTemplateCandidate(int $parseJobId, int $tenantId, string $fingerprint, array $detected, bool $countObservation = true): void
     {
         if ($fingerprint === '') {
             return;
         }
         try {
+            $matchUpdate = $countObservation ? 'match_count = match_count + 1,' : '';
             $stmt = Db::knowledge()->prepare('INSERT INTO prescription_template_candidates
                 (company_uid, branch_uid, tenant_id, parse_job_id, detected_fingerprint, ai_field_map_json, human_fixed_field_map_json, match_count, status, created_at, updated_at)
                 VALUES (:company_uid, :branch_uid, :tenant_id, :parse_job_id, :detected_fingerprint, :ai_field_map_json, NULL, 1, "candidate", NOW(), NOW())
-                ON DUPLICATE KEY UPDATE match_count = match_count + 1, updated_at = NOW()');
+                ON DUPLICATE KEY UPDATE
+                    tenant_id = VALUES(tenant_id),
+                    parse_job_id = VALUES(parse_job_id),
+                    ai_field_map_json = VALUES(ai_field_map_json),
+                    ' . $matchUpdate . '
+                    updated_at = NOW()');
             $stmt->execute([
                 ':company_uid' => current_company_uid(),
                 ':branch_uid' => current_branch_uid(),
@@ -83,7 +118,28 @@ final class PrescriptionKnowledgeService
                 ':detected_fingerprint' => $fingerprint,
                 ':ai_field_map_json' => json_encode($detected, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
             ]);
-        } catch (Throwable) {
+
+            $pdo = Db::knowledge();
+            if (Db::columnExists($pdo, 'prescription_template_candidates', 'ai_layout_profile_json')) {
+                $profile = is_array($detected['ai_layout_profile'] ?? null) ? $detected['ai_layout_profile'] : null;
+                $update = $pdo->prepare('UPDATE prescription_template_candidates
+                    SET ai_layout_profile_json = :ai_layout_profile_json,
+                        last_parse_job_id = :last_parse_job_id,
+                        updated_at = NOW()
+                    WHERE company_uid = :company_uid
+                      AND branch_uid = :branch_uid
+                      AND detected_fingerprint = :detected_fingerprint
+                    LIMIT 1');
+                $update->execute([
+                    ':ai_layout_profile_json' => $profile ? json_encode($profile, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : null,
+                    ':last_parse_job_id' => $parseJobId,
+                    ':company_uid' => current_company_uid(),
+                    ':branch_uid' => current_branch_uid(),
+                    ':detected_fingerprint' => $fingerprint,
+                ]);
+            }
+        } catch (Throwable $e) {
+            $this->logLearningError('template_candidate_save', $e, ['parse_job_id' => $parseJobId, 'fingerprint' => $fingerprint]);
         }
     }
 
@@ -783,6 +839,309 @@ final class PrescriptionKnowledgeService
     }
 
     /**
+     * 修正確定後の項目一覧から、拠点別レイアウトテンプレート候補をスコア化する。
+     * ここでは値そのものではなく、項目構成・出現順・修正率だけを保存する。
+     *
+     * @param array<int,array<string,mixed>> $selectedFields
+     */
+    public function saveLayoutFieldLearning(?int $parseJobId, int $tenantId, array $selectedFields): void
+    {
+        // 既存呼び出し互換用。実体はテンプレート候補の人間確認スコア化。
+        $this->saveLayoutTemplateLearning($parseJobId, $tenantId, $selectedFields);
+    }
+
+    /** @param array<int,array<string,mixed>> $selectedFields */
+    public function saveLayoutTemplateLearning(?int $parseJobId, int $tenantId, array $selectedFields): void
+    {
+        if (!$parseJobId || !$selectedFields || !Db::tableExists(Db::knowledge(), 'prescription_template_candidates')) {
+            return;
+        }
+        try {
+            $context = $this->learningContextForParseJob($parseJobId, $tenantId);
+            $fingerprint = (string)($context['layout_fingerprint'] ?? 'unknown');
+            if ($fingerprint === '' || $fingerprint === 'unknown') {
+                return;
+            }
+
+            $profile = $this->buildHumanLayoutProfile($selectedFields);
+            if ((int)($profile['field_count'] ?? 0) <= 0) {
+                return;
+            }
+
+            $metrics = $this->layoutProfileMetrics($profile);
+            $score = $this->layoutTemplateStabilityScore(
+                (int)($metrics['observed_count'] ?? 0),
+                (int)($metrics['edited_count'] ?? 0),
+                (int)($metrics['added_count'] ?? 0),
+                (int)($metrics['empty_count'] ?? 0),
+                (int)($metrics['confirmed_count'] ?? 0)
+            );
+
+            $pdo = Db::knowledge();
+            $this->saveTemplateCandidate($parseJobId, $tenantId, $fingerprint, [
+                'layout_fingerprint' => $fingerprint,
+                'features' => $context,
+                'human_layout_profile_pending' => true,
+            ], false);
+
+            if (!Db::columnExists($pdo, 'prescription_template_candidates', 'human_confirmed_count')) {
+                // SQL未適用でも処方箋保存は止めない。ログだけ残す。
+                $this->logLearningError('layout_template_learning_schema', new RuntimeException('prescription_template_candidates human_* columns are missing'), [
+                    'parse_job_id' => $parseJobId,
+                    'tenant_id' => $tenantId,
+                    'layout_fingerprint' => $fingerprint,
+                ]);
+                return;
+            }
+
+            $stmt = $pdo->prepare('UPDATE prescription_template_candidates
+                SET human_fixed_field_map_json = :human_fixed_field_map_json,
+                    layout_profile_json = :layout_profile_json,
+                    human_confirmed_count = human_confirmed_count + :confirmed_count,
+                    human_edited_count = human_edited_count + :edited_count,
+                    human_added_count = human_added_count + :added_count,
+                    human_empty_count = human_empty_count + :empty_count,
+                    correction_rate = :correction_rate,
+                    stability_score = :stability_score,
+                    field_count = :field_count,
+                    last_parse_job_id = :last_parse_job_id,
+                    updated_at = NOW()
+                WHERE company_uid = :company_uid
+                  AND branch_uid = :branch_uid
+                  AND detected_fingerprint = :detected_fingerprint
+                LIMIT 1');
+            $stmt->execute([
+                ':human_fixed_field_map_json' => json_encode($profile, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ':layout_profile_json' => json_encode($profile + ['score_metrics' => $metrics], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ':confirmed_count' => (int)$metrics['confirmed_count'],
+                ':edited_count' => (int)$metrics['edited_count'],
+                ':added_count' => (int)$metrics['added_count'],
+                ':empty_count' => (int)$metrics['empty_count'],
+                ':correction_rate' => (float)$metrics['correction_rate'],
+                ':stability_score' => $score,
+                ':field_count' => (int)$profile['field_count'],
+                ':last_parse_job_id' => $parseJobId,
+                ':company_uid' => current_company_uid(),
+                ':branch_uid' => current_branch_uid(),
+                ':detected_fingerprint' => $fingerprint,
+            ]);
+
+            $this->promoteTemplateCandidateIfReady($fingerprint);
+        } catch (Throwable $e) {
+            $this->logLearningError('layout_template_learning', $e, ['parse_job_id' => $parseJobId, 'tenant_id' => $tenantId]);
+        }
+    }
+
+    /** @param array<int,array<string,mixed>> $selectedFields */
+    private function buildHumanLayoutProfile(array $selectedFields): array
+    {
+        $fields = [];
+        $seen = [];
+        foreach ($selectedFields as $idx => $row) {
+            $fieldKey = $this->normalizeFieldKey((string)($row['field_key'] ?? $row['key'] ?? 'field'));
+            if ($fieldKey === '') {
+                continue;
+            }
+            $fieldGroup = trim((string)($row['field_group'] ?? $row['group'] ?? 'other')) ?: 'other';
+            if (!in_array($fieldGroup, ['patient','insurance','public_expense','prescription','medical_institution','medication','pharmacy','note','qr','other'], true)) {
+                $fieldGroup = 'other';
+            }
+            $dedupeKey = $fieldGroup . ':' . $fieldKey;
+            if (isset($seen[$dedupeKey])) {
+                continue;
+            }
+            $seen[$dedupeKey] = true;
+            $ai = trim((string)($row['source_ai_value'] ?? ''));
+            $final = trim((string)($row['field_value'] ?? ''));
+            $correctionType = $this->correctionType($this->normalizeLearningValue($ai), $this->normalizeLearningValue($final));
+            $fields[] = [
+                'field_key' => $fieldKey,
+                'field_label' => mb_substr(trim((string)($row['field_label'] ?? $fieldKey)), 0, 80),
+                'field_group' => $fieldGroup,
+                'source_section' => mb_substr(trim((string)($row['source_section'] ?? '')), 0, 80),
+                'display_order' => is_numeric($row['display_order'] ?? null) ? (int)$row['display_order'] : $idx,
+                'is_selected' => !empty($row['is_selected']),
+                'include_for_output' => !empty($row['include_for_output']),
+                'needs_human_check' => !empty($row['needs_human_check']),
+                'correction_type' => $correctionType,
+                'confidence_bucket' => $this->confidenceBucket(is_numeric($row['confidence'] ?? null) ? (float)$row['confidence'] : null),
+            ];
+        }
+        usort($fields, static fn(array $a, array $b): int => ((int)($a['display_order'] ?? 0) <=> (int)($b['display_order'] ?? 0)));
+        $sequence = array_map(static fn(array $f): string => $f['field_group'] . ':' . $f['field_key'], $fields);
+        return [
+            'profile_version' => 'human_field_profile_v1',
+            'field_count' => count($fields),
+            'field_sequence_hash' => sha1(implode('|', $sequence)),
+            'fields' => $fields,
+            'generated_at' => date('c'),
+        ];
+    }
+
+    /** @param array<string,mixed> $profile */
+    private function layoutProfileMetrics(array $profile): array
+    {
+        $metrics = ['observed_count' => 0, 'edited_count' => 0, 'added_count' => 0, 'empty_count' => 0, 'confirmed_count' => 0, 'correction_rate' => 0.0];
+        foreach (($profile['fields'] ?? []) as $field) {
+            if (!is_array($field) || empty($field['is_selected'])) {
+                continue;
+            }
+            $metrics['observed_count']++;
+            $type = (string)($field['correction_type'] ?? 'confirmed');
+            if ($type === 'edited') {
+                $metrics['edited_count']++;
+            } elseif ($type === 'added') {
+                $metrics['added_count']++;
+            } elseif ($type === 'emptied') {
+                $metrics['empty_count']++;
+            } else {
+                $metrics['confirmed_count']++;
+            }
+        }
+        $bad = $metrics['edited_count'] + $metrics['added_count'] + $metrics['empty_count'];
+        $metrics['correction_rate'] = $metrics['observed_count'] > 0 ? round(($bad / $metrics['observed_count']) * 100, 2) : 0.0;
+        return $metrics;
+    }
+
+    private function layoutTemplateStabilityScore(int $observed, int $edited, int $added, int $empty, int $confirmed): float
+    {
+        if ($observed <= 0) {
+            return 0.0;
+        }
+        $bad = $edited + $added + $empty;
+        $correctionRate = ($bad / max(1, $observed)) * 100;
+        $confirmedRate = ($confirmed / max(1, $observed)) * 100;
+        // これはAIの読取信頼度ではなく、テンプレートとして次回補助に使う安定度。
+        $score = 18.0;
+        $score += min(32.0, $observed * 2.0);
+        $score += min(30.0, $confirmedRate * 0.30);
+        $score -= min(35.0, $correctionRate * 0.45);
+        if ($observed >= 8 && $correctionRate <= 35.0) {
+            $score += 10.0;
+        }
+        return round(max(0.0, min(95.0, $score)), 2);
+    }
+
+    private function promoteTemplateCandidateIfReady(string $fingerprint): void
+    {
+        try {
+            $pdo = Db::knowledge();
+            if (!Db::columnExists($pdo, 'prescription_template_candidates', 'human_confirmed_count')) {
+                return;
+            }
+            $stmt = $pdo->prepare('SELECT * FROM prescription_template_candidates
+                WHERE company_uid = :company_uid
+                  AND branch_uid = :branch_uid
+                  AND detected_fingerprint = :detected_fingerprint
+                  AND status IN ("candidate", "approved")
+                LIMIT 1');
+            $stmt->execute([
+                ':company_uid' => current_company_uid(),
+                ':branch_uid' => current_branch_uid(),
+                ':detected_fingerprint' => $fingerprint,
+            ]);
+            $candidate = $stmt->fetch();
+            if (!$candidate) {
+                return;
+            }
+
+            $humanTotal = (int)($candidate['human_confirmed_count'] ?? 0) + (int)($candidate['human_edited_count'] ?? 0) + (int)($candidate['human_added_count'] ?? 0) + (int)($candidate['human_empty_count'] ?? 0);
+            $score = is_numeric($candidate['stability_score'] ?? null) ? (float)$candidate['stability_score'] : 0.0;
+            $correctionRate = is_numeric($candidate['correction_rate'] ?? null) ? (float)$candidate['correction_rate'] : 100.0;
+            $fieldCount = (int)($candidate['field_count'] ?? 0);
+
+            // 本番運用向け: 1回だけの読み取りでは昇格しない。最低3回相当の人間確認を要求する。
+            if ($humanTotal < 3 || $fieldCount < 5 || $score < 55.0 || $correctionRate > 75.0) {
+                return;
+            }
+
+            $templateKey = 'branch_' . preg_replace('/[^a-zA-Z0-9_]+/', '_', current_branch_uid()) . '_fp_' . substr($fingerprint, 0, 12);
+            $profile = json_decode((string)($candidate['layout_profile_json'] ?? $candidate['human_fixed_field_map_json'] ?? '{}'), true) ?: [];
+            $fieldMap = [
+                'template_source' => 'auto_promoted_from_human_review',
+                'layout_fingerprint' => $fingerprint,
+                'template_score' => $score,
+                'correction_rate' => $correctionRate,
+                'sample_count' => $humanTotal,
+                'profile' => $profile,
+            ];
+
+            $insert = $pdo->prepare('INSERT INTO prescription_templates
+                (company_uid, branch_uid, tenant_id, scope_type, medical_institution_key, template_key, display_name, version_label,
+                 paper_orientation, layout_fingerprint, field_map_json, match_threshold, success_count, failure_count,
+                 avg_correction_rate, is_active, created_at, updated_at)
+                VALUES
+                (:company_uid, :branch_uid, :tenant_id, "branch", NULL, :template_key, :display_name, "v1",
+                 "unknown", :layout_fingerprint, :field_map_json, 65.00, :success_count, 0,
+                 :avg_correction_rate, 1, NOW(), NOW())
+                ON DUPLICATE KEY UPDATE
+                    field_map_json = VALUES(field_map_json),
+                    success_count = GREATEST(success_count, VALUES(success_count)),
+                    avg_correction_rate = VALUES(avg_correction_rate),
+                    is_active = 1,
+                    updated_at = NOW(),
+                    id = LAST_INSERT_ID(id)');
+            $insert->execute([
+                ':company_uid' => current_company_uid(),
+                ':branch_uid' => current_branch_uid(),
+                ':tenant_id' => $candidate['tenant_id'] ?? null,
+                ':template_key' => $templateKey,
+                ':display_name' => '拠点別処方箋テンプレート ' . substr($fingerprint, 0, 8),
+                ':layout_fingerprint' => $fingerprint,
+                ':field_map_json' => json_encode($fieldMap, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ':success_count' => $humanTotal,
+                ':avg_correction_rate' => $correctionRate,
+            ]);
+            $templateId = (int)$pdo->lastInsertId();
+
+            if ($templateId > 0 && Db::columnExists($pdo, 'prescription_templates', 'template_score')) {
+                $extra = $pdo->prepare('UPDATE prescription_templates
+                    SET source_candidate_id = :source_candidate_id,
+                        approval_mode = "auto",
+                        template_score = :template_score,
+                        sample_count = :sample_count,
+                        last_seen_at = NOW()
+                    WHERE id = :id');
+                $extra->execute([
+                    ':source_candidate_id' => (int)$candidate['id'],
+                    ':template_score' => $score,
+                    ':sample_count' => $humanTotal,
+                    ':id' => $templateId,
+                ]);
+            }
+
+            $candidateSql = 'UPDATE prescription_template_candidates
+                SET status = "approved", approved_template_id = :approved_template_id, updated_at = NOW()';
+            if (Db::columnExists($pdo, 'prescription_template_candidates', 'approved_at')) {
+                $candidateSql .= ', approved_at = COALESCE(approved_at, NOW())';
+            }
+            $candidateSql .= ' WHERE id = :id';
+            $update = $pdo->prepare($candidateSql);
+            $update->execute([':approved_template_id' => $templateId ?: null, ':id' => (int)$candidate['id']]);
+        } catch (Throwable $e) {
+            $this->logLearningError('template_candidate_promote', $e, ['fingerprint' => $fingerprint]);
+        }
+    }
+
+    private function confidenceBucket(?float $confidence): string
+    {
+        $confidence = $this->normalizeConfidencePercent($confidence);
+        if ($confidence === null) {
+            return 'unknown';
+        }
+        if ($confidence < 25) {
+            return '<25';
+        }
+        if ($confidence < 50) {
+            return '25-49';
+        }
+        if ($confidence < 75) {
+            return '50-74';
+        }
+        return '75-100';
+    }
+
+    /**
      * 補助学習DBに蓄積された人間修正傾向をOpenAIの読み取りプロンプトへ渡す短いヒントにする。
      */
     public function buildOpenAiLearningHints(string $layoutFingerprint = '', int $limit = 18): string
@@ -978,7 +1337,7 @@ final class PrescriptionKnowledgeService
             $width = (int)($row['width'] ?? 0);
             $height = (int)($row['height'] ?? 0);
             $size = (int)($row['file_size_bytes'] ?? 0);
-            $features = (new PrescriptionTemplateDetector())->featuresFromDimensions($width, $height, '');
+            $features = (new PrescriptionTemplateDetector())->featuresFromDimensions($width, $height, '', $size);
             $context['layout_fingerprint'] = hash('sha256', json_encode($features, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
             $context['quality_bucket'] = $this->imageQualityBucket($width, $height, $size);
             $context['quality_issue_flags'] = $this->imageQualityIssueFlags($width, $height, $size);
@@ -1069,7 +1428,12 @@ final class PrescriptionKnowledgeService
                 ':last_ai_value_sample' => mb_substr($this->learningSample($aiRaw, $this->fieldRiskLevel($fieldGroup, $fieldKey, $fieldLabel)), 0, 255),
                 ':last_final_value_sample' => mb_substr($this->learningSample($finalRaw, $this->fieldRiskLevel($fieldGroup, $fieldKey, $fieldLabel)), 0, 255),
             ]);
-        } catch (Throwable) {
+        } catch (Throwable $e) {
+            $this->logLearningError('layout_field_learning_score', $e, [
+                'field_key' => $fieldKey,
+                'field_group' => $fieldGroup,
+                'layout_fingerprint' => (string)($context['layout_fingerprint'] ?? 'unknown'),
+            ]);
         }
     }
 
@@ -1618,6 +1982,30 @@ final class PrescriptionKnowledgeService
                 ':parse_job_id' => $parseJobId,
             ]);
         } catch (Throwable) {
+        }
+    }
+
+
+    /** @param array<string,mixed> $context */
+    private function logLearningError(string $area, Throwable $e, array $context = []): void
+    {
+        try {
+            if (!Db::tableExists(Db::knowledge(), 'prescription_learning_error_logs')) {
+                return;
+            }
+            $stmt = Db::knowledge()->prepare('INSERT INTO prescription_learning_error_logs
+                (company_uid, branch_uid, area, error_class, error_message, context_json, created_at)
+                VALUES (:company_uid, :branch_uid, :area, :error_class, :error_message, :context_json, NOW())');
+            $stmt->execute([
+                ':company_uid' => current_company_uid(),
+                ':branch_uid' => current_branch_uid(),
+                ':area' => mb_substr($area, 0, 120),
+                ':error_class' => mb_substr(get_class($e), 0, 160),
+                ':error_message' => mb_substr($e->getMessage(), 0, 1000),
+                ':context_json' => json_encode($context, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            ]);
+        } catch (Throwable) {
+            // ログ保存に失敗しても本処理は止めない。
         }
     }
 
