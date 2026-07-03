@@ -50,6 +50,18 @@ function ocr_string(mixed $value): string
     return trim((string)$value);
 }
 
+function ocr_confidence_percent(mixed $value): ?float
+{
+    if (!is_numeric($value)) {
+        return null;
+    }
+    $confidence = (float)$value;
+    if ($confidence >= 0.0 && $confidence <= 1.0) {
+        $confidence *= 100.0;
+    }
+    return round(max(0.0, min(100.0, $confidence)), 2);
+}
+
 function normalize_review_key(string $key): string
 {
     return preg_replace('/[^a-zA-Z0-9_.-]+/', '_', trim($key)) ?: 'field';
@@ -117,7 +129,7 @@ function upsert_review_field(array &$rows, array $field): void
         'value' => ocr_string($field['value'] ?? ''),
         'ai_value' => ocr_string($field['ai_value'] ?? ($field['value'] ?? '')),
         'source_section' => ocr_string($field['source_section'] ?? ''),
-        'confidence' => is_numeric($field['confidence'] ?? null) ? (float)$field['confidence'] : null,
+        'confidence' => ocr_confidence_percent($field['confidence'] ?? null),
         'needs_human_check' => !empty($field['needs_human_check']),
         'include_default' => !empty($field['include_default']),
         'ui_template' => ocr_string($field['ui_template'] ?? 'input') ?: 'input',
@@ -139,8 +151,11 @@ function upsert_review_field(array &$rows, array $field): void
     if ($rows[$key]['ai_value'] === '' && $row['ai_value'] !== '') {
         $rows[$key]['ai_value'] = $row['ai_value'];
     }
-    if ($rows[$key]['confidence'] === null && $row['confidence'] !== null) {
-        $rows[$key]['confidence'] = $row['confidence'];
+    if ($row['confidence'] !== null) {
+        // 標準項目の全体信頼度より、AIが返した個別項目の信頼度を優先する。
+        if ($rows[$key]['confidence'] === null || ($rows[$key]['source'] ?? '') === 'normalized' || (($row['source'] ?? '') === 'ai' && (float)$row['confidence'] !== (float)$rows[$key]['confidence'])) {
+            $rows[$key]['confidence'] = $row['confidence'];
+        }
     }
     $rows[$key]['needs_human_check'] = $rows[$key]['needs_human_check'] || $row['needs_human_check'];
     $rows[$key]['include_default'] = $rows[$key]['include_default'] || $row['include_default'];
@@ -203,18 +218,18 @@ function render_dynamic_value_control(string $name, string $value, string $uiTem
 
 $reviewRowsByKey = [];
 $fixedDefinitions = [
-    ['patient.name', '患者名', 'patient', $patient['name'] ?? '', 'person_name', 'input', 10],
-    ['patient.gender', '性別', 'patient', $patient['gender'] ?? '', 'text', 'select', 20],
-    ['patient.birth_date', '生年月日', 'patient', $patient['birth_date'] ?? '', 'date', 'date', 30],
-    ['insurance.insurance_no', '保険者番号', 'insurance', $insurance['insurance_no'] ?? '', 'code', 'input', 40],
-    ['insurance.insured_symbol_number', '記号番号', 'insurance', $insurance['insured_symbol_number'] ?? '', 'code', 'input', 50],
-    ['insurance.copay_rate', '負担割合', 'insurance', $insurance['copay_rate'] ?? '', 'text', 'input', 60],
-    ['prescription.issued_on', '処方箋発行日', 'prescription', $prescription['issued_on'] ?? '', 'date', 'date', 70],
-    ['prescription.expires_on', '処方箋使用期間', 'prescription', $prescription['expires_on'] ?? '', 'date', 'date', 75],
-    ['medical_institution.code', '医療機関コード', 'medical_institution', $medical['code'] ?? '', 'code', 'input', 80],
-    ['medical_institution.name', '医療機関名', 'medical_institution', $medical['name'] ?? '', 'text', 'input', 90],
+    ['patient.name', '患者名', 'patient', $patient['name'] ?? '', 'person_name', 'input', 10, $patient['confidence'] ?? null],
+    ['patient.gender', '性別', 'patient', $patient['gender'] ?? '', 'text', 'select', 20, $patient['confidence'] ?? null],
+    ['patient.birth_date', '生年月日', 'patient', $patient['birth_date'] ?? '', 'date', 'date', 30, $patient['confidence'] ?? null],
+    ['insurance.insurance_no', '保険者番号', 'insurance', $insurance['insurance_no'] ?? '', 'code', 'input', 40, $insurance['confidence'] ?? null],
+    ['insurance.insured_symbol_number', '記号番号', 'insurance', $insurance['insured_symbol_number'] ?? '', 'code', 'input', 50, $insurance['confidence'] ?? null],
+    ['insurance.copay_rate', '負担割合', 'insurance', $insurance['copay_rate'] ?? '', 'text', 'input', 60, $insurance['confidence'] ?? null],
+    ['prescription.issued_on', '処方箋発行日', 'prescription', $prescription['issued_on'] ?? '', 'date', 'date', 70, $prescription['confidence'] ?? null],
+    ['prescription.expires_on', '処方箋使用期間', 'prescription', $prescription['expires_on'] ?? '', 'date', 'date', 75, $prescription['confidence'] ?? null],
+    ['medical_institution.code', '医療機関コード', 'medical_institution', $medical['code'] ?? '', 'code', 'input', 80, $medical['confidence'] ?? null],
+    ['medical_institution.name', '医療機関名', 'medical_institution', $medical['name'] ?? '', 'text', 'input', 90, $medical['confidence'] ?? null],
 ];
-foreach ($fixedDefinitions as [$key, $label, $group, $value, $valueType, $uiTemplate, $order]) {
+foreach ($fixedDefinitions as [$key, $label, $group, $value, $valueType, $uiTemplate, $order, $confidence]) {
     $value = ocr_string($value);
     if ($value === '') {
         continue;
@@ -226,7 +241,7 @@ foreach ($fixedDefinitions as [$key, $label, $group, $value, $valueType, $uiTemp
         'value' => $value,
         'ai_value' => $value,
         'source_section' => '標準項目',
-        'confidence' => $data['overall_confidence'] ?? null,
+        'confidence' => $confidence,
         'needs_human_check' => false,
         'include_default' => true,
         'ui_template' => $uiTemplate,
@@ -375,7 +390,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
           $label = (string)($field['field_label'] ?? $key);
           $value = (string)($field['value'] ?? '');
           $aiValue = (string)($field['ai_value'] ?? $value);
-          $confidence = is_numeric($field['confidence'] ?? null) ? (float)$field['confidence'] : null;
+          $confidence = ocr_confidence_percent($field['confidence'] ?? null);
           $includeDefault = array_key_exists($key, $fieldPreferences) ? (bool)$fieldPreferences[$key] : (bool)($field['include_default'] ?? ($value !== ''));
           if ($currentGroup !== $group):
             $currentGroup = $group;

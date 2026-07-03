@@ -284,10 +284,37 @@ PROMPT;
     public static function normalize(array $value): array
     {
         $normalized = array_replace_recursive(self::blankNormalized(), $value);
+        $normalized = self::normalizeSectionConfidenceValues($normalized);
         $normalized['medications'] = self::normalizeMedications(is_array($normalized['medications'] ?? null) ? $normalized['medications'] : []);
         $normalized = self::applyReferenceNormalizers($normalized);
         $normalized['form_fields'] = self::normalizeFormFields($normalized);
         return $normalized;
+    }
+
+    /** @param array<string,mixed> $normalized @return array<string,mixed> */
+    private static function normalizeSectionConfidenceValues(array $normalized): array
+    {
+        foreach (['patient', 'insurance', 'prescription', 'medical_institution'] as $section) {
+            if (isset($normalized[$section]) && is_array($normalized[$section]) && array_key_exists('confidence', $normalized[$section])) {
+                $normalized[$section]['confidence'] = self::normalizeConfidencePercent($normalized[$section]['confidence']);
+            }
+        }
+        if (array_key_exists('overall_confidence', $normalized)) {
+            $normalized['overall_confidence'] = self::normalizeConfidencePercent($normalized['overall_confidence']);
+        }
+        return $normalized;
+    }
+
+    private static function normalizeConfidencePercent(mixed $confidence): float
+    {
+        if (!is_numeric($confidence)) {
+            return 0.0;
+        }
+        $value = (float)$confidence;
+        if ($value >= 0.0 && $value <= 1.0) {
+            $value *= 100.0;
+        }
+        return round(max(0.0, min(100.0, $value)), 2);
     }
 
     public static function blankNormalized(): array
@@ -397,7 +424,7 @@ PROMPT;
                 'usage_text' => (string)($med['usage_text'] ?? ''),
                 'days_count' => is_numeric($med['days_count'] ?? null) ? (int)$med['days_count'] : null,
                 'amount_text' => (string)($med['amount_text'] ?? ''),
-                'confidence' => is_numeric($med['confidence'] ?? null) ? (float)$med['confidence'] : 0.0,
+                'confidence' => self::normalizeConfidencePercent($med['confidence'] ?? 0.0),
                 'needs_human_check' => (bool)($med['needs_human_check'] ?? true),
                 'reason' => (string)($med['reason'] ?? ''),
             ];
@@ -515,7 +542,7 @@ PROMPT;
             'value' => (string)($field['value'] ?? ''),
             'value_type' => $valueType,
             'source_section' => mb_substr((string)($field['source_section'] ?? ''), 0, 160),
-            'confidence' => is_numeric($field['confidence'] ?? null) ? (float)$field['confidence'] : 0.0,
+            'confidence' => self::normalizeConfidencePercent($field['confidence'] ?? 0.0),
             'needs_human_check' => (bool)($field['needs_human_check'] ?? true),
             'include_default' => (bool)($field['include_default'] ?? false),
             'output_candidate' => (bool)($field['output_candidate'] ?? true),

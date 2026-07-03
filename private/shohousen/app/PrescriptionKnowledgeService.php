@@ -200,29 +200,37 @@ final class PrescriptionKnowledgeService
         return array_slice($out, 0, 8);
     }
 
-    public function upsertCorrectionRule(string $fieldType, string $wrongValue, string $correctValue): void
+    public function upsertCorrectionRule(string $fieldType, string $wrongValue, string $correctValue, mixed $confidence = null): void
     {
         $wrongValue = trim($wrongValue);
         $correctValue = trim($correctValue);
-        if ($wrongValue === '' || $correctValue === '' || $wrongValue === $correctValue) {
+        if ($wrongValue === '' || $correctValue === '' || $this->sameCorrectionText($wrongValue, $correctValue)) {
             return;
         }
         // 患者・保険など個人性/請求影響が強いものは、自動補正ルールには昇格しない。
-        if (!in_array($fieldType, ['drug_name', 'drug_generic_name', 'drug_brand_name', 'drug_raw_text', 'usage_text', 'medical_institution_name'], true)) {
+        // raw_drug_text は補助学習用の原文で、改行差分や処方ブロック全体を拾いやすいため自動補正ルール化しない。
+        if (!in_array($fieldType, ['drug_name', 'drug_generic_name', 'drug_brand_name', 'usage_text', 'medical_institution_name'], true)) {
             return;
         }
+        if (!$this->isSafeAutoCorrectionRule($fieldType, $wrongValue, $correctValue)) {
+            return;
+        }
+
+        $precision = $this->initialCorrectionPrecision($fieldType, $wrongValue, $correctValue, $confidence);
+        $minScore = $this->initialCorrectionMinScore($precision);
 
         // 1回の修正だけで precision_rate=100 / active にしない。
         // 3回以上同じ修正が出た時点で、OpenAIへの補助ヒント/候補として使える状態にする。
         $sql = 'INSERT INTO prescription_auto_correction_rules
-                (company_uid, branch_uid, scope_type, field_type, wrong_value, correct_value, support_count, success_count, failure_count, precision_rate, min_score, is_active, created_at, updated_at)
-                VALUES (:company_uid, :branch_uid, "branch", :field_type, :wrong_value, :correct_value, 1, 1, 0, 55.00, 95.00, 0, NOW(), NOW())
+                (company_uid, branch_uid, scope_type, field_type, wrong_value, correct_value, support_count, success_count, failure_count, precision_rate, min_score, evaluation_status, is_active, created_at, updated_at)
+                VALUES (:company_uid, :branch_uid, "branch", :field_type, :wrong_value, :correct_value, 1, 1, 0, :precision_rate, :min_score, "candidate", 0, NOW(), NOW())
                 ON DUPLICATE KEY UPDATE
                     support_count = support_count + 1,
                     success_count = success_count + 1,
-                    precision_rate = LEAST(98.00, 50.00 + (support_count + 1) * 8.00),
-                    min_score = GREATEST(65.00, 95.00 - (support_count + 1) * 5.00),
-                    is_active = CASE WHEN (support_count + 1) >= 3 THEN 1 ELSE is_active END,
+                    precision_rate = LEAST(98.00, ((COALESCE(precision_rate, 0) * support_count) + VALUES(precision_rate)) / GREATEST(support_count + 1, 1) + CASE WHEN (support_count + 1) >= 3 THEN 8.00 ELSE 0.00 END),
+                    min_score = GREATEST(65.00, LEAST(COALESCE(min_score, 95.00), VALUES(min_score), 95.00 - (support_count + 1) * 5.00)),
+                    evaluation_status = CASE WHEN (support_count + 1) >= 3 THEN "active" ELSE "candidate" END,
+                    is_active = CASE WHEN (support_count + 1) >= 3 THEN 1 ELSE 0 END,
                     updated_at = NOW()';
         try {
             $stmt = Db::knowledge()->prepare($sql);
@@ -230,11 +238,73 @@ final class PrescriptionKnowledgeService
                 ':company_uid' => current_company_uid(),
                 ':branch_uid' => current_branch_uid(),
                 ':field_type' => $fieldType,
-                ':wrong_value' => $wrongValue,
-                ':correct_value' => $correctValue,
+                ':wrong_value' => mb_substr($wrongValue, 0, 255),
+                ':correct_value' => mb_substr($correctValue, 0, 255),
+                ':precision_rate' => $precision,
+                ':min_score' => $minScore,
             ]);
         } catch (Throwable) {
         }
+    }
+
+    private function sameCorrectionText(string $wrongValue, string $correctValue): bool
+    {
+        $normalize = static function (string $value): string {
+            $value = str_replace(["\r\n", "\r"], "\n", trim($value));
+            $value = preg_replace('/[ \t　]+/u', ' ', $value) ?? $value;
+            return preg_replace('/\n+/u', "\n", $value) ?? $value;
+        };
+        return $normalize($wrongValue) === $normalize($correctValue);
+    }
+
+    private function isSafeAutoCorrectionRule(string $fieldType, string $wrongValue, string $correctValue): bool
+    {
+        $text = $wrongValue . "\n" . $correctValue;
+        if (mb_strlen($wrongValue) > 120 || mb_strlen($correctValue) > 120) {
+            return false;
+        }
+        if (in_array($fieldType, ['drug_name', 'drug_generic_name', 'drug_brand_name'], true)) {
+            // 薬品名欄に用法や改行付き処方ブロックが混入したものは補正ルール化しない。
+            if (str_contains($correctValue, "\n") || str_contains($wrongValue, "\n")) {
+                return false;
+            }
+            if (preg_match('/(朝食後|昼食後|夕食後|毎食|就寝|起床|分\s*\d+|\d+\s*[×xX]\s*|\d+\s*日分|用法)/u', $text)) {
+                return false;
+            }
+        }
+        if ($fieldType === 'usage_text' && mb_strlen($correctValue) > 80) {
+            return false;
+        }
+        return true;
+    }
+
+    private function initialCorrectionPrecision(string $fieldType, string $wrongValue, string $correctValue, mixed $confidence): float
+    {
+        $conf = is_numeric($confidence) ? $this->normalizeConfidencePercent((float)$confidence) : null;
+        $score = match ($fieldType) {
+            'drug_name' => 58.0,
+            'drug_generic_name', 'drug_brand_name' => 54.0,
+            'usage_text' => 52.0,
+            'medical_institution_name' => 56.0,
+            default => 50.0,
+        };
+        if ($conf !== null) {
+            $score += ($conf - 50.0) * 0.18;
+        }
+        $maxLen = max(mb_strlen($wrongValue), mb_strlen($correctValue), 1);
+        $distance = levenshtein(mb_substr($wrongValue, 0, 255), mb_substr($correctValue, 0, 255));
+        $ratio = min(1.0, $distance / $maxLen);
+        if ($ratio <= 0.20) {
+            $score += 8.0;
+        } elseif ($ratio >= 0.70) {
+            $score -= 10.0;
+        }
+        return round(max(35.0, min(90.0, $score)), 2);
+    }
+
+    private function initialCorrectionMinScore(float $precision): float
+    {
+        return round(max(65.0, min(98.0, 102.0 - ($precision * 0.45))), 2);
     }
 
     /**
@@ -704,7 +774,7 @@ final class PrescriptionKnowledgeService
 
                 // OCR補正ルールに昇格してよい低リスク項目だけ、次回AI解析前の候補として使う。
                 if (in_array($fieldGroup, ['medication','medical_institution'], true) && $normalizedAi !== '' && $normalizedFinal !== '' && $normalizedAi !== $normalizedFinal) {
-                    $this->upsertCorrectionRule($fieldKey, $aiRaw, $finalRaw);
+                    $this->upsertCorrectionRule($fieldKey, $aiRaw, $finalRaw, $confidence);
                 }
             }
         } catch (Throwable) {

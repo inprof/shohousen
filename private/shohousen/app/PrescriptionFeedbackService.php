@@ -62,7 +62,7 @@ final class PrescriptionFeedbackService
 
             // 個人特定性が低く、補正効果が高い項目だけ補助学習型DBへ反映する。
             if (in_array($row['field_type'], ['drug_name', 'drug_generic_name', 'drug_brand_name', 'drug_raw_text', 'usage_text', 'medical_institution_name'], true)) {
-                $this->knowledge->upsertCorrectionRule($row['field_type'], $row['ai_value'], $row['final_value']);
+                $this->knowledge->upsertCorrectionRule($row['field_type'], $row['ai_value'], $row['final_value'], $row['confidence']);
             }
         }
     }

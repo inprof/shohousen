@@ -157,6 +157,18 @@ function is_learning_only_prescription_field(string $key, string $label): bool
     return false;
 }
 
+function normalize_prescription_confidence_percent(mixed $value): ?float
+{
+    if (!is_numeric($value)) {
+        return null;
+    }
+    $confidence = (float)$value;
+    if ($confidence >= 0.0 && $confidence <= 1.0) {
+        $confidence *= 100.0;
+    }
+    return round(max(0.0, min(100.0, $confidence)), 2);
+}
+
 /**
  * 解析結果確認画面で「出力・学習対象」に選択された動的項目をPOSTから復元する。
  * 固定帳票ではなく、処方箋ごとに変動する項目/セルもこの配列として保存する。
@@ -226,7 +238,7 @@ function selected_prescription_fields_from_post(array $post): array
             'field_value' => $value,
             'source_ai_value' => $aiValue,
             'source_section' => mb_substr((string)($sections[$i] ?? ''), 0, 160),
-            'confidence' => is_numeric($confidences[$i] ?? null) ? (float)$confidences[$i] : null,
+            'confidence' => normalize_prescription_confidence_percent($confidences[$i] ?? null),
             'needs_human_check' => isset($needsChecks[$i]) && (string)$needsChecks[$i] === '1',
             'is_selected' => $isSelected,
             'include_for_output' => $isSelected && (isset($outputCandidates[$i]) ? (string)$outputCandidates[$i] === '1' : true),
