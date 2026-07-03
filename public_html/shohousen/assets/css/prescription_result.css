@@ -381,3 +381,12 @@
     width: 100%;
   }
 }
+
+/* 総量自動計算の根拠表示 */
+.calculated-amount-help {
+  display: block;
+  margin-top: 4px;
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.4;
+}

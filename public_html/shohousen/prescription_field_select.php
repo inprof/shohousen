@@ -96,7 +96,7 @@ View::header('使用項目の選択', ['styles' => ['/assets/css/prescription_fi
     <div class="dynamic-field-head">
       <div>
         <h2>保存・出力に使う項目</h2>
-        <p>ここで選んだ項目だけをQRや後続出力の候補にします。補助学習データは前画面のDB保存時点で作成済みです。</p>
+        <p>ここではQRや後続出力に使う項目だけを選びます。値の修正は前画面で確定済みのため、この画面では編集できません。</p>
       </div>
       <div class="field-actions">
         <button class="btn ghost small" type="button" data-field-check="all">全選択</button>
@@ -135,7 +135,7 @@ View::header('使用項目の選択', ['styles' => ['/assets/css/prescription_fi
           <div class="field-main">
             <label>
               <span class="field-label"><?= h((string)$field['field_label']) ?></span>
-              <input name="dynamic_field_value[<?= $i ?>]" value="<?= h($fieldValue) ?>" placeholder="空欄">
+              <input name="dynamic_field_value[<?= $i ?>]" value="<?= h($fieldValue) ?>" placeholder="空欄" readonly>
             </label>
             <div class="field-compare">
               <div><span>AI値</span><code><?= h($aiValue !== '' ? $aiValue : '空欄') ?></code></div>

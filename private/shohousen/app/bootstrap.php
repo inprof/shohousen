@@ -73,6 +73,7 @@ require_once __DIR__ . '/SuperAdminAuth.php';
 require_once __DIR__ . '/View.php';
 require_once __DIR__ . '/SuperAdminView.php';
 require_once __DIR__ . '/PrescriptionReferenceRuleService.php';
+require_once __DIR__ . '/MedicationDosageCalculator.php';
 require_once __DIR__ . '/Repositories.php';
 require_once __DIR__ . '/DrugNameMasterService.php';
 require_once __DIR__ . '/DrugDictionaryService.php';

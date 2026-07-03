@@ -1,0 +1,32 @@
+{
+  "version": "2026-07-03",
+  "purpose": "処方薬の用法・日数から総量を補助計算するための保守的ルール。薬品名中のmg/g/mLは原則として規格量であり、総量計算の根拠にはしない。",
+  "quantity_units": {
+    "solid": ["錠", "カプセル", "包", "袋", "枚", "本", "個"],
+    "liquid": ["mL", "ml", "cc", "滴"],
+    "weight": ["mg", "g"]
+  },
+  "frequency_rules": [
+    {"pattern": "1日N回", "frequency_per_day": "N", "examples": ["1日1回", "1日2回", "1日3回"]},
+    {"pattern": "分N", "frequency_per_day": "N", "examples": ["分1", "分2", "分3"]},
+    {"pattern": "毎食後/毎食前/毎食間", "frequency_per_day": 3},
+    {"pattern": "朝・昼・夕", "frequency_per_day": 3},
+    {"pattern": "朝・夕", "frequency_per_day": 2},
+    {"pattern": "朝食後/昼食後/夕食後/就寝前/起床時の単独指定", "frequency_per_day": 1}
+  ],
+  "as_needed_keywords": ["頓服", "屯服", "疼痛時", "発作時", "必要時", "不眠時", "便秘時", "嘔気時", "適宜", "随時"],
+  "calculation": "1回量 × 服薬回数/日 × 日数",
+  "examples": [
+    {"usage_text": "1錠×朝食後", "days_count": 28, "result": "28錠"},
+    {"usage_text": "1回1錠 1日3回 毎食後", "days_count": 28, "result": "84錠"},
+    {"usage_text": "1回5mL 1日3回 毎食後", "days_count": 7, "result": "105mL"},
+    {"usage_text": "1包 朝夕食後", "days_count": 14, "result": "28包"}
+  ],
+  "do_not_auto_confirm": [
+    "頓服・必要時の処方",
+    "日数が未読取の処方",
+    "1回量が未読取の処方",
+    "服薬回数が未読取の処方",
+    "外用薬で塗布範囲・使用量が日ごとに変動する処方"
+  ]
+}

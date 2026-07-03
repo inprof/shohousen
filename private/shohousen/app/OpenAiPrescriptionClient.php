@@ -138,13 +138,14 @@ final class OpenAiPrescriptionClient
 医療情報のため、不明点は推測で埋めず、空欄・null・needs_human_check=trueで返してください。
 患者情報、保険情報、医療機関情報、処方薬情報を抽出します。
 処方箋の様式は医療機関・拠点ごとに異なるため、固定テンプレートだけに寄せず、画像内に見える項目名と値をできる限り form_fields に列挙してください。
-form_fields には、空欄でも帳票上に存在する主要項目を入れてください。例: 公費負担者番号、公費負担医療の受給者番号、保険者番号、被保険者証の記号番号、患者氏名、フリガナ、生年月日、性別、区分、交付年月日、処方箋使用期間、医療機関所在地、医療機関名、電話番号、保険医氏名、都道府県番号、点数表番号、医療機関コード、備考、保険医署名、記名押印、変更不可（医療上必要）、後発品変更不可、患者希望、先発医薬品患者希望、薬品名、用量、用法、日数、QR有無など。
+form_fields には、空欄でも帳票上に存在する主要項目を入れてください。例: 公費負担者番号、公費負担医療の受給者番号、保険者番号、被保険者証の記号番号、患者氏名、フリガナ、生年月日、性別、区分、交付年月日、処方箋使用期間、医療機関所在地、医療機関名、電話番号、保険医氏名、都道府県番号、点数表番号、医療機関コード、備考、保険医署名、記名押印、変更不可（医療上必要）、後発品変更不可、患者希望、先発医薬品患者希望、QR有無など。
+薬品名・用量・用法・日数・総量は form_fields に重複出力せず、medications 配列に集約してください。画面側では medications の処方薬カードで修正・DB保存します。
 ただし、画像上に実際に書かれていない一般名候補・商品名候補・薬品名元テキスト・辞書候補・推定候補は、form_fieldsには出さないでください。これらは画面表示項目ではなく、medications内または後処理辞書の補助データとして扱います。
 画面側では field_group と value_type を見て、form_fields から修正用の入力一覧を動的に生成します。画像内に見える項目は、固定項目に入らなくても form_fields に残してください。
 source_section には、上部左、上部右、患者欄、保険欄、医療機関欄、処方欄、備考欄、下部QRなど、帳票上の位置が分かる表現を入れてください。これは拠点別レイアウト学習に使います。
 出力に使うかどうかは人間が後で選択するため、include_default は「通常出力に使いそうな項目」だけ true にし、それ以外も form_fields には残してください。
 出力は必ず指定JSON Schemaに従い、余計な文章を含めないでください。
-数字、日付、薬品名、用法、日数は特に慎重に扱ってください。
+数字、日付、薬品名、用法、日数は特に慎重に扱ってください。用法は、1回量（錠/包/カプセル/mL/mg/g等）、服薬回数（1日N回、分N、毎食後、朝夕、就寝前等）、日数を分離して読んでください。総量は 1回量×服薬回数/日×日数 で判断できる場合のみ amount_text に入れ、判断できない場合は空欄またはneeds_human_check=trueにしてください。薬品名中の5mg/0.05mgなどは規格量の可能性が高いため、総量として扱わないでください。
 日付は西暦4桁または和暦（明治/大正/昭和/平成/令和、M/T/S/H/R）を認識してください。2桁年だけの場合は西暦・和暦を推測で確定せずneeds_human_check=trueにしてください。
 保険者番号は6桁または8桁のみです。10桁などで読めた場合は、別欄の番号を混ぜている可能性が高いため、保険者番号として確定せずneeds_human_check=trueにしてください。
 公費負担者番号は8桁、公費負担医療の受給者番号は7桁です。医療機関等コードは通常7桁、都道府県番号+点数表番号付きなら10桁候補として扱ってください。
@@ -412,6 +413,10 @@ PROMPT;
             if (!is_array($field) || self::isLearningOnlyFormField($field)) {
                 continue;
             }
+            // 処方薬は medications の専用カードで修正・保存するため、form_fields 側には重複表示しない。
+            if ((string)($field['field_group'] ?? '') === 'medication') {
+                continue;
+            }
             $fields[] = self::normalizeFormField($field);
         }
 
@@ -446,17 +451,7 @@ PROMPT;
             ]);
         }
 
-        foreach (($normalized['medications'] ?? []) as $i => $med) {
-            if (!is_array($med)) {
-                continue;
-            }
-            $n = $i + 1;
-            $conf = $med['confidence'] ?? 0;
-            $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_drug_name', 'field_label' => '処方' . $n . ' 薬品名', 'field_group' => 'medication', 'value' => (string)($med['drug_name'] ?? ''), 'value_type' => 'drug', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => trim((string)($med['drug_name'] ?? '')) !== '', 'output_candidate' => true, 'reason' => 'structured_medication']);
-            $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_dose', 'field_label' => '処方' . $n . ' 用量', 'field_group' => 'medication', 'value' => (string)($med['dose_text'] ?? ''), 'value_type' => 'amount', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => trim((string)($med['dose_text'] ?? '')) !== '', 'output_candidate' => true, 'reason' => 'structured_medication']);
-            $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_usage', 'field_label' => '処方' . $n . ' 用法', 'field_group' => 'medication', 'value' => (string)($med['usage_text'] ?? ''), 'value_type' => 'usage', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => trim((string)($med['usage_text'] ?? '')) !== '', 'output_candidate' => true, 'reason' => 'structured_medication']);
-            $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_days', 'field_label' => '処方' . $n . ' 日数', 'field_group' => 'medication', 'value' => (string)($med['days_count'] ?? ''), 'value_type' => 'number', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => ($med['days_count'] ?? '') !== '', 'output_candidate' => true, 'reason' => 'structured_medication']);
-        }
+        // 処方薬情報は medications 配列の専用UIで扱う。form_fields へ複製しない。
 
         $seen = [];
         $out = [];

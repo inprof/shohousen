@@ -203,6 +203,12 @@ function selected_prescription_fields_from_post(array $post): array
             $group = 'other';
         }
 
+        // 薬品名・用法・日数・総量は prescription_medications へ正規保存する。
+        // prescription_selected_fields にも保存すると、修正画面と表示/選択画面の値が二重管理になり不整合になる。
+        if ($group === 'medication') {
+            continue;
+        }
+
         if (is_learning_only_prescription_field($key, $label)) {
             continue;
         }
@@ -308,14 +314,7 @@ function default_selected_fields_from_prescription(array $prescription): array
     $add('medical_institution.code', '医療機関コード', 'medical_institution', $prescription['institution_code'] ?? '', null, 80);
     $add('medical_institution.name', '医療機関名', 'medical_institution', $prescription['medical_name'] ?? '', null, 90);
 
-    foreach ((array)($prescription['medications'] ?? []) as $i => $med) {
-        $n = $i + 1;
-        $base = 1000 + ($i * 20);
-        $add('medications.' . $n . '.drug_name', '処方' . $n . ' 薬品名', 'medication', $med['drug_name'] ?? '', $med['ai_drug_name'] ?? null, $base + 1);
-        $add('medications.' . $n . '.usage_text', '処方' . $n . ' 用法', 'medication', $med['usage_text'] ?? '', $med['ai_usage_text'] ?? null, $base + 2);
-        $add('medications.' . $n . '.days_count', '処方' . $n . ' 日数', 'medication', $med['days_count'] ?? '', $med['ai_days_count'] ?? null, $base + 3);
-        $add('medications.' . $n . '.amount_text', '処方' . $n . ' 総量/備考', 'medication', $med['amount_text'] ?? '', $med['ai_amount_text'] ?? null, $base + 4);
-    }
+    // 処方薬は prescription_medications に保存済みのため、使用項目選択用の動的項目には複製しない。
 
     return $rows;
 }
@@ -533,6 +532,7 @@ function create_prescription_from_post(array $user, array $post): int
         $aiDrugNames = $post['ai_drug_name'] ?? [];
         $aiGenericNames = $post['ai_generic_name'] ?? [];
         $aiBrandNames = $post['ai_brand_name'] ?? [];
+        $doseTexts = $post['dose_text'] ?? [];
         $usageTexts = $post['usage_text'] ?? [];
         $daysCounts = $post['days_count'] ?? [];
         $amountTexts = $post['amount_text'] ?? [];
@@ -564,6 +564,15 @@ function create_prescription_from_post(array $user, array $post): int
                 $drugName = $brandName !== '' ? $brandName : $genericName;
             }
             $days = (int)($daysCounts[$i] ?? 0);
+            $doseText = trim((string)($doseTexts[$i] ?? ''));
+            $usageText = trim((string)($usageTexts[$i] ?? ''));
+            $currentAmountText = trim((string)($amountTexts[$i] ?? ''));
+            $calculatedAmountText = class_exists('MedicationDosageCalculator')
+                ? MedicationDosageCalculator::calculateAmountText($drugName, $doseText, $usageText, $days)
+                : '';
+            if (class_exists('MedicationDosageCalculator') && MedicationDosageCalculator::shouldReplaceAmountText($currentAmountText, $calculatedAmountText)) {
+                $currentAmountText = $calculatedAmountText;
+            }
             $status = $stockStatuses[$i] ?? 'unknown';
             $relation = (string)($relationTypes[$i] ?? 'unknown');
             if (!in_array($relation, ['single','generic_brand_pair','multiple_candidates','unknown'], true)) {
@@ -574,9 +583,9 @@ function create_prescription_from_post(array $user, array $post): int
                 ':prescription_id' => $prescriptionId,
                 ':sort_order' => $i + 1,
                 ':drug_name' => $drugName,
-                ':usage_text' => $usageTexts[$i] ?? null,
+                ':usage_text' => $usageText !== '' ? $usageText : null,
                 ':days_count' => $days ?: null,
-                ':amount_text' => trim((string)($amountTexts[$i] ?? '')) !== '' ? trim((string)$amountTexts[$i]) : ($days ? $days . '日分' : null),
+                ':amount_text' => $currentAmountText !== '' ? $currentAmountText : ($days ? $days . '日分' : null),
                 ':stock_status' => in_array($status, ['adopted','in_stock','low_stock','not_stocked','unknown'], true) ? $status : 'unknown',
                 ':needs_check' => $status === 'low_stock' ? 1 : 0,
             ];

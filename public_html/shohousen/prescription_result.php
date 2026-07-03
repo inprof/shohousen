@@ -42,6 +42,8 @@ $fieldGroupLabels = [
     'qr' => 'QR・コード',
     'other' => 'その他AI項目',
 ];
+$dynamicFieldGroupLabels = $fieldGroupLabels;
+unset($dynamicFieldGroupLabels['medication']);
 
 function ocr_string(mixed $value): string
 {
@@ -237,11 +239,15 @@ foreach ($dynamicFields as $i => $field) {
     if (!is_array($field) || is_learning_only_review_field($field)) {
         continue;
     }
+    // 薬品名・用法・日数・総量は下の処方薬カードで修正・保存する。動的項目側に重複表示しない。
+    if ((string)($field['field_group'] ?? '') === 'medication') {
+        continue;
+    }
     $field['display_order'] = $field['display_order'] ?? (1000 + $i);
     upsert_review_field($reviewRowsByKey, $field);
 }
 $reviewRows = array_values($reviewRowsByKey);
-$fieldGroupOrder = array_keys($fieldGroupLabels);
+$fieldGroupOrder = array_keys($dynamicFieldGroupLabels);
 usort($reviewRows, static function (array $a, array $b) use ($fieldGroupOrder): int {
     $ga = array_search((string)($a['field_group'] ?? 'other'), $fieldGroupOrder, true);
     $gb = array_search((string)($b['field_group'] ?? 'other'), $fieldGroupOrder, true);
@@ -340,13 +346,13 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     <div class="dynamic-field-head">
       <div>
         <h2>AI読み取り項目の修正</h2>
-        <p>帳票上にある項目を一覧で修正します。固定テンプレートにない項目や空欄枠も、必要ならここで追加してください。</p>
+        <p>患者・保険・公費・医療機関など、処方薬以外の項目を修正します。処方薬は下の専用カードだけで修正・保存します。</p>
       </div>
       <div class="field-actions dynamic-add-controls">
         <label class="field-add-target">
           <span class="sr-only">追加先分類</span>
           <select data-add-dynamic-group>
-            <?php foreach ($fieldGroupLabels as $g => $gLabel): ?>
+            <?php foreach ($dynamicFieldGroupLabels as $g => $gLabel): ?>
               <option value="<?= h($g) ?>"><?= h($gLabel) ?></option>
             <?php endforeach; ?>
           </select>
@@ -390,7 +396,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
               <label>
                 <span class="field-label">分類</span>
                 <select name="original_dynamic_group[]">
-                  <?php foreach ($fieldGroupLabels as $g => $gLabel): ?>
+                  <?php foreach ($dynamicFieldGroupLabels as $g => $gLabel): ?>
                     <option value="<?= h($g) ?>" <?= $g === $group ? 'selected' : '' ?>><?= h($gLabel) ?></option>
                   <?php endforeach; ?>
                 </select>
@@ -426,7 +432,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
         <div class="field-main full">
           <div class="review-field-grid">
             <label><span class="field-label">項目名</span><input name="original_dynamic_label[]" value="" placeholder="例: 保険医氏名"></label>
-            <label><span class="field-label">分類</span><select name="original_dynamic_group[]" data-manual-group-select><?php foreach ($fieldGroupLabels as $g => $gLabel): ?><option value="<?= h($g) ?>"><?= h($gLabel) ?></option><?php endforeach; ?></select></label>
+            <label><span class="field-label">分類</span><select name="original_dynamic_group[]" data-manual-group-select><?php foreach ($dynamicFieldGroupLabels as $g => $gLabel): ?><option value="<?= h($g) ?>"><?= h($gLabel) ?></option><?php endforeach; ?></select></label>
             <label class="review-field-value"><span class="field-label">修正後の値</span><textarea name="original_dynamic_value[]" rows="2" placeholder="追加で読み取り・入力した値" data-review-value data-field-key="manual_field"></textarea></label>
           </div>
           <div class="field-meta"><span>人間追加項目</span><span class="attention">AI未検出</span></div>
@@ -445,10 +451,20 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   </section>
 
   <h2>処方薬情報（<?= count($medications) ?>件）</h2>
-  <p class="form-help">画面では処方箋上で確認・修正すべき薬品名、用法、日数、総量だけを表示します。一般名候補・商品名候補・薬品名元テキストなどの補助学習用データは画面に出さず、内部で保持します。</p>
+  <p class="form-help">処方薬はこのカードだけで修正・DB保存します。総量は用法と日数から計算できる場合に自動更新します。一般名候補・商品名候補・薬品名元テキストなどの補助学習用データは画面に出さず、内部で保持します。</p>
   <div class="edit-med-list" data-med-list>
-    <?php foreach ($medications as $i => $med): $drugCandidates = $candidates['medications'][$i]['drug_name'] ?? []; ?>
-      <div class="edit-med-row ocr-med-row">
+    <?php foreach ($medications as $i => $med):
+      $drugCandidates = $candidates['medications'][$i]['drug_name'] ?? [];
+      $doseText = (string)($med['dose_text'] ?? '');
+      $amountCalc = class_exists('MedicationDosageCalculator')
+          ? MedicationDosageCalculator::calculate((string)($med['drug_name'] ?? ''), $doseText, (string)($med['usage_text'] ?? ''), $med['days_count'] ?? null)
+          : ['amount_text' => '', 'note' => '', 'rule_code' => ''];
+      $displayAmount = (string)($med['amount_text'] ?? '');
+      if (!empty($amountCalc['amount_text']) && class_exists('MedicationDosageCalculator') && MedicationDosageCalculator::shouldReplaceAmountText($displayAmount, (string)$amountCalc['amount_text'])) {
+          $displayAmount = (string)$amountCalc['amount_text'];
+      }
+    ?>
+      <div class="edit-med-row ocr-med-row" data-med-row>
         <span class="row-no"><?= $i + 1 ?></span>
         <label class="med-field-main">薬品名（代表名）
           <textarea name="drug_name[]" rows="2" list="drugCandidates<?= $i ?>" placeholder="保存する代表薬品名"><?= h((string)($med['drug_name'] ?? '')) ?></textarea>
@@ -462,9 +478,13 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
         <input type="hidden" name="generic_name[]" value="<?= h(medication_visible_support_value($med, 'generic_name')) ?>">
         <input type="hidden" name="brand_name[]" value="<?= h(medication_visible_support_value($med, 'brand_name')) ?>">
         <input type="hidden" name="raw_drug_text[]" value="<?= h((string)($med['raw_drug_text'] ?? ($med['drug_name'] ?? ''))) ?>">
-        <label>用法<input name="usage_text[]" value="<?= h((string)($med['usage_text'] ?? '')) ?>"></label>
-        <label>日数<input type="number" name="days_count[]" value="<?= h((string)($med['days_count'] ?? '')) ?>"></label>
-        <label>総量/備考<input name="amount_text[]" value="<?= h((string)($med['amount_text'] ?? '')) ?>"></label>
+        <input type="hidden" name="dose_text[]" value="<?= h($doseText) ?>">
+        <label>用法<input name="usage_text[]" value="<?= h((string)($med['usage_text'] ?? '')) ?>" data-med-usage></label>
+        <label>日数<input type="number" name="days_count[]" value="<?= h((string)($med['days_count'] ?? '')) ?>" data-med-days></label>
+        <label>総量/備考
+          <input name="amount_text[]" value="<?= h($displayAmount) ?>" data-med-amount data-auto-amount="<?= !empty($amountCalc['amount_text']) ? '1' : '0' ?>">
+          <small class="calculated-amount-help" data-amount-rule-note><?= h((string)($amountCalc['note'] ?? '')) ?></small>
+        </label>
         <label>在庫
           <select name="stock_status[]">
             <?php foreach (['adopted'=>'採用薬','in_stock'=>'在庫あり','low_stock'=>'在庫僅少','not_stocked'=>'未採用','unknown'=>'未確認'] as $key => $label): ?>
@@ -493,9 +513,10 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       <input type="hidden" name="generic_name[]" value="">
       <input type="hidden" name="brand_name[]" value="">
       <input type="hidden" name="raw_drug_text[]" value="">
-      <label>用法<input name="usage_text[]" value=""></label>
-      <label>日数<input type="number" name="days_count[]" value=""></label>
-      <label>総量/備考<input name="amount_text[]" value=""></label>
+      <input type="hidden" name="dose_text[]" value="">
+      <label>用法<input name="usage_text[]" value="" data-med-usage></label>
+      <label>日数<input type="number" name="days_count[]" value="" data-med-days></label>
+      <label>総量/備考<input name="amount_text[]" value="" data-med-amount data-auto-amount="0"><small class="calculated-amount-help" data-amount-rule-note></small></label>
       <label>在庫<select name="stock_status[]"><option value="unknown" selected>未確認</option><option value="adopted">採用薬</option><option value="in_stock">在庫あり</option><option value="low_stock">在庫僅少</option><option value="not_stocked">未採用</option></select></label>
       <input type="hidden" name="drug_name_relation_type[]" value="unknown">
       <input type="hidden" name="ai_drug_name[]" value="">
@@ -549,7 +570,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
 </form>
 <script>
 (function () {
-  var FIELD_GROUP_LABELS = <?= json_encode($fieldGroupLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+  var FIELD_GROUP_LABELS = <?= json_encode($dynamicFieldGroupLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
 
   function renumberMedicationRows() {
     document.querySelectorAll('[data-med-list] .ocr-med-row').forEach(function (row, index) {
@@ -560,6 +581,119 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
 
   function normalizeTextForDetect(value) {
     return String(value || '').replace(/\s+/g, '').toLowerCase();
+  }
+
+  function normalizeDosageText(value) {
+    return String(value || '')
+      .replace(/[０-９]/g, function (c) { return String.fromCharCode(c.charCodeAt(0) - 0xFEE0); })
+      .replace(/[．]/g, '.')
+      .replace(/[ｍＭ][ｌＬ]|㎖/g, 'mL')
+      .replace(/㏄/g, 'cc')
+      .trim();
+  }
+
+  function formatAmountNumber(value) {
+    var rounded = Math.round(value * 1000) / 1000;
+    if (Math.abs(rounded - Math.round(rounded)) < 0.00001) return String(Math.round(rounded));
+    return String(rounded).replace(/0+$/, '').replace(/\.$/, '');
+  }
+
+  function normalizeUnit(unit) {
+    var u = String(unit || '').trim();
+    var lower = u.toLowerCase();
+    if (['tablet', 'tablets', 'tab'].indexOf(lower) >= 0) return '錠';
+    if (['cap', 'capsule'].indexOf(lower) >= 0) return 'カプセル';
+    if (['ml', 'cc'].indexOf(lower) >= 0) return 'mL';
+    return u;
+  }
+
+  function inferUnitFromDrugName(drugName) {
+    var name = normalizeDosageText(drugName);
+    if (/錠|OD錠|口腔内崩壊錠/.test(name)) return '錠';
+    if (/カプセル|cap/i.test(name)) return 'カプセル';
+    if (/包|顆粒|散|細粒|ドライシロップ/.test(name)) return '包';
+    if (/シロップ|液|内用液|懸濁|mL|ml/.test(name)) return 'mL';
+    if (/貼付|テープ|パップ|湿布/.test(name)) return '枚';
+    return '';
+  }
+
+  function extractDays(daysValue, usageText) {
+    var days = parseInt(normalizeDosageText(daysValue), 10);
+    if (Number.isFinite(days) && days > 0) return days;
+    var m = normalizeDosageText(usageText).match(/(\d+)\s*日\s*分?/);
+    return m ? parseInt(m[1], 10) : null;
+  }
+
+  function isAsNeededUsage(text) {
+    return /頓服|屯服|疼痛時|発作時|必要時|不眠時|便秘時|嘔気時|適宜|随時/.test(normalizeDosageText(text));
+  }
+
+  function extractPerDose(doseText, usageText, drugName) {
+    var sources = [doseText, usageText];
+    for (var i = 0; i < sources.length; i++) {
+      var source = normalizeDosageText(sources[i]);
+      if (!source) continue;
+      var m = source.match(/(\d+(?:\.\d+)?)\s*(錠|tablet|tablets|tab|カプセル|cap|capsule|包|袋|mL|ml|cc|g|mg|滴|枚|本|個)/i);
+      if (m) return { value: parseFloat(m[1]), unit: normalizeUnit(m[2]) };
+      m = source.match(/(?:^|[^0-9.])(\d+(?:\.\d+)?)\s*[x×]\s*(?:朝|昼|夕|毎食|食後|食前|就寝|寝る|起床)/);
+      if (m) {
+        var unit = inferUnitFromDrugName(drugName);
+        if (unit) return { value: parseFloat(m[1]), unit: unit };
+      }
+    }
+    return null;
+  }
+
+  function extractFrequencyPerDay(usageText) {
+    var text = normalizeDosageText(usageText);
+    if (!text) return null;
+    var m = text.match(/1\s*日\s*(\d+(?:\.\d+)?)\s*回/);
+    if (m) return parseFloat(m[1]);
+    m = text.match(/分\s*(\d+(?:\.\d+)?)/);
+    if (m) return parseFloat(m[1]);
+    if (/毎食/.test(text)) return 3;
+    var count = 0;
+    [/朝|朝食後|朝食前|起床時/, /昼|昼食後|昼食前/, /夕|夕食後|夕食前/, /就寝|寝る前/].forEach(function (pattern) {
+      if (pattern.test(text)) count += 1;
+    });
+    return count > 0 ? count : null;
+  }
+
+  function calculateMedicationAmount(drugName, doseText, usageText, daysValue) {
+    var days = extractDays(daysValue, usageText);
+    if (!days) return { amount: '', note: '日数が未入力のため総量を計算できません。' };
+    if (isAsNeededUsage(usageText)) return { amount: '', note: '頓服・必要時の用法は総量を自動確定できません。' };
+    var dose = extractPerDose(doseText, usageText, drugName);
+    if (!dose) return { amount: '', note: '1回量が読めないため総量を計算できません。' };
+    var freq = extractFrequencyPerDay(usageText);
+    if (!freq) return { amount: '', note: '服薬回数が読めないため総量を計算できません。' };
+    var total = dose.value * freq * days;
+    var amount = formatAmountNumber(total) + dose.unit;
+    return { amount: amount, note: formatAmountNumber(dose.value) + dose.unit + ' × ' + formatAmountNumber(freq) + '回/日 × ' + days + '日' };
+  }
+
+  function recalculateMedicationRowAmount(row, force) {
+    if (!row) return;
+    var amountInput = row.querySelector('[name="amount_text[]"]');
+    if (!amountInput) return;
+    if (!force && amountInput.dataset.userEdited === '1') return;
+    var drug = row.querySelector('[name="drug_name[]"]')?.value || '';
+    var dose = row.querySelector('[name="dose_text[]"]')?.value || '';
+    var usage = row.querySelector('[name="usage_text[]"]')?.value || '';
+    var days = row.querySelector('[name="days_count[]"]')?.value || '';
+    var result = calculateMedicationAmount(drug, dose, usage, days);
+    var note = row.querySelector('[data-amount-rule-note]');
+    if (note) note.textContent = result.note || '';
+    if (result.amount) {
+      amountInput.value = result.amount;
+      amountInput.dataset.autoAmount = '1';
+    }
+  }
+
+  function recalculateAllMedicationAmounts() {
+    document.querySelectorAll('[data-med-list] .ocr-med-row').forEach(function (row) {
+      recalculateMedicationRowAmount(row, false);
+    });
   }
 
   function uniqueManualFieldKey(group) {
@@ -683,18 +817,9 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   }
 
   function syncMedicationFromDynamicControl(control) {
-    var row = control.closest('.review-field-row');
-    if (!row) return;
-    var targetName = detectMedicationTarget(row);
-    if (!targetName) return;
-    var index = detectMedicationIndex(row);
-    var medRow = ensureMedicationRow(index);
-    if (!medRow) return;
-    var target = medRow.querySelector('[name="' + targetName + '"]');
-    if (!target) return;
-    target.value = control.value || '';
-    target.classList.add('synced-from-dynamic');
-    setTimeout(function () { target.classList.remove('synced-from-dynamic'); }, 700);
+    // 処方薬は専用カードだけを正として修正・保存する。
+    // 動的項目から薬品カードへ同期すると二重管理になりやすいため無効化する。
+    return;
   }
 
   function findReviewValueByExactKey(key) {
@@ -741,6 +866,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   }
 
   function syncPreview() {
+    recalculateAllMedicationAmounts();
     syncFixedHiddenFields();
     document.querySelectorAll('[data-preview]').forEach(function (node) {
       var key = node.getAttribute('data-preview');
@@ -774,6 +900,17 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
 
   document.addEventListener('input', function (event) {
     if (event.target instanceof HTMLElement && event.target.closest('.result-card')) {
+      if (event.target.matches('[name="amount_text[]"]')) {
+        event.target.dataset.userEdited = '1';
+      }
+      if (event.target.matches('[name="drug_name[]"], [name="usage_text[]"], [name="days_count[]"]')) {
+        var medRow = event.target.closest('.ocr-med-row');
+        if (medRow) {
+          var amount = medRow.querySelector('[name="amount_text[]"]');
+          if (amount && amount.dataset.autoAmount === '1') amount.dataset.userEdited = '0';
+          recalculateMedicationRowAmount(medRow, false);
+        }
+      }
       if (event.target.matches('[data-review-value]')) {
         syncMedicationFromDynamicControl(event.target);
       }
@@ -822,8 +959,10 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       var html = tmpl.innerHTML.replace(/__NO__/g, String(list.querySelectorAll('.ocr-med-row').length + 1));
       var wrap = document.createElement('div');
       wrap.innerHTML = html.trim();
-      list.appendChild(wrap.firstElementChild);
+      var addedRow = wrap.firstElementChild;
+      list.appendChild(addedRow);
       renumberMedicationRows();
+      recalculateMedicationRowAmount(addedRow, true);
       syncPreview();
       return;
     }
