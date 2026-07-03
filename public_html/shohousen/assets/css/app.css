@@ -550,3 +550,104 @@ input[readonly] { background: #f9fbfe; }
   opacity: .55;
 }
 @media print { .deploy-version { display: none; } }
+
+/* =========================================================
+   処方箋受付ルール判定
+   期限・変更不可・患者希望・疑義照会候補・QR前確認を全画面で表示する共通UI。
+   ========================================================= */
+.rule-check-panel {
+  margin: 18px 0;
+  padding: 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: #fff;
+}
+.rule-check-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  margin-bottom: 12px;
+}
+.rule-check-head h2 {
+  margin: 0 0 6px;
+}
+.rule-check-head p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.rule-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.saved-rule-summary {
+  margin: 8px 0 12px;
+}
+.rule-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 26px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 800;
+  white-space: nowrap;
+  background: #eef2f7;
+  color: #334155;
+}
+.rule-badge.info { background: #eef6ff; color: #1d4ed8; }
+.rule-badge.warning { background: #fff7db; color: #8a5a00; }
+.rule-badge.danger,
+.rule-badge.inquiry { background: #fee2e2; color: #b91c1c; }
+.rule-check-list {
+  display: grid;
+  gap: 10px;
+}
+.rule-check-list.compact {
+  margin: 10px 0 16px;
+}
+.rule-check-item {
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-left-width: 5px;
+  border-radius: 12px;
+  background: #fff;
+}
+.rule-check-item strong {
+  display: block;
+  margin-bottom: 5px;
+}
+.rule-check-item p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+.rule-check-item.info { border-left-color: #60a5fa; background: #f8fbff; }
+.rule-check-item.warning { border-left-color: #f59e0b; background: #fffdf3; }
+.rule-check-item.danger,
+.rule-check-item.block { border-left-color: #ef4444; background: #fff7f7; }
+.rule-check-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+.rule-check-meta span {
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: #eef2f7;
+  color: #526071;
+  font-size: 11px;
+}
+.rule-check-meta .attention {
+  background: #fee2e2;
+  color: #b91c1c;
+  font-weight: 800;
+}
+@media (max-width: 760px) {
+  .rule-check-head { display: block; }
+  .rule-summary { margin-top: 10px; }
+}

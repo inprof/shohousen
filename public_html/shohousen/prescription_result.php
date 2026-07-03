@@ -26,6 +26,9 @@ $knowledgeService = new PrescriptionKnowledgeService();
 $fieldPreferences = method_exists($knowledgeService, 'branchFieldPreferenceMap')
     ? $knowledgeService->branchFieldPreferenceMap()
     : [];
+$ruleEngine = new PrescriptionRuleEngineService();
+$ruleChecks = $ruleEngine->evaluateNormalized($data);
+$ruleSummary = PrescriptionRuleEngineService::summarize($ruleChecks);
 
 $fieldGroupLabels = [
     'patient' => '患者情報',
@@ -164,6 +167,7 @@ $fixedDefinitions = [
     ['insurance.insured_symbol_number', '記号番号', 'insurance', $insurance['insured_symbol_number'] ?? '', 'code', 'input', 50],
     ['insurance.copay_rate', '負担割合', 'insurance', $insurance['copay_rate'] ?? '', 'text', 'input', 60],
     ['prescription.issued_on', '処方箋発行日', 'prescription', $prescription['issued_on'] ?? '', 'date', 'date', 70],
+    ['prescription.expires_on', '処方箋使用期間', 'prescription', $prescription['expires_on'] ?? '', 'date', 'date', 75],
     ['medical_institution.code', '医療機関コード', 'medical_institution', $medical['code'] ?? '', 'code', 'input', 80],
     ['medical_institution.name', '医療機関名', 'medical_institution', $medical['name'] ?? '', 'text', 'input', 90],
 ];
@@ -258,6 +262,38 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     <span class="flow-step">3. 使用項目を選択</span>
     <span class="flow-step">4. QR作成</span>
   </div>
+
+  <?php if ($ruleChecks): ?>
+    <section class="rule-check-panel" aria-label="処方箋受付ルール判定">
+      <div class="rule-check-head">
+        <div>
+          <h2>処方箋受付ルール判定</h2>
+          <p>期限、必須項目、変更不可、患者希望、一般名処方、信頼度を確認します。判定は薬剤師確認の補助で、保存時に修正後データで再判定されます。</p>
+        </div>
+        <div class="rule-summary">
+          <span class="rule-badge danger">重要 <?= h((string)($ruleSummary['block'] + $ruleSummary['danger'])) ?></span>
+          <span class="rule-badge warning">確認 <?= h((string)$ruleSummary['warning']) ?></span>
+          <span class="rule-badge info">参考 <?= h((string)$ruleSummary['info']) ?></span>
+          <?php if ($ruleSummary['requires_inquiry'] > 0): ?><span class="rule-badge inquiry">疑義照会候補 <?= h((string)$ruleSummary['requires_inquiry']) ?></span><?php endif; ?>
+        </div>
+      </div>
+      <div class="rule-check-list">
+        <?php foreach ($ruleChecks as $check): ?>
+          <?php $sev = (string)($check['severity'] ?? 'info'); ?>
+          <article class="rule-check-item <?= h($sev) ?>">
+            <strong><?= h((string)($check['title'] ?? '確認項目')) ?></strong>
+            <p><?= h((string)($check['message'] ?? '')) ?></p>
+            <div class="rule-check-meta">
+              <?php if (!empty($check['detected_value'])): ?><span>検出: <?= h((string)$check['detected_value']) ?></span><?php endif; ?>
+              <?php if (!empty($check['recommended_action'])): ?><span>対応: <?= h((string)$check['recommended_action']) ?></span><?php endif; ?>
+              <?php if (!empty($check['requires_inquiry'])): ?><span class="attention">疑義照会候補</span><?php endif; ?>
+              <?php if (!empty($check['blocks_qr'])): ?><span class="attention">QR前確認</span><?php endif; ?>
+            </div>
+          </article>
+        <?php endforeach; ?>
+      </div>
+    </section>
+  <?php endif; ?>
 
   <section class="dynamic-field-card dynamic-field-review-card">
     <div class="dynamic-field-head">

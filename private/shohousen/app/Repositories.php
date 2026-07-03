@@ -595,6 +595,17 @@ function create_prescription_from_post(array $user, array $post): int
         $selectedFields = selected_prescription_fields_from_post($post);
         save_prescription_selected_fields($pdo, $tenantId, $prescriptionId, $parseJobId, $selectedFields);
 
+        // 処方箋受付時に薬局が確認すべきルールを、人間修正後データで再判定して保存する。
+        // 期限切れ、変更不可/署名、患者希望、一般名処方、必須項目、信頼度などはQR作成前の確認材料にする。
+        $ruleChecks = [];
+        try {
+            $ruleEngine = new PrescriptionRuleEngineService();
+            $ruleChecks = $ruleEngine->evaluatePostData($post);
+            $ruleEngine->saveRuleChecks($tenantId, $prescriptionId, $parseJobId, $ruleChecks);
+        } catch (Throwable) {
+            // ルール判定保存失敗で処方箋自体の保存は止めない。
+        }
+
         // 使用項目の採用傾向は次の使用項目選択画面で保存する。
         // ここではOCR補正・レイアウト学習だけを行う。
 
@@ -622,7 +633,11 @@ function create_prescription_from_post(array $user, array $post): int
                     ->execute([':prescription_id' => $prescriptionId, ':id' => $parseJobId]);
             }
         }
-        audit_log($tenantId, (int)$user['id'], 'prescription.create', 'prescriptions', $prescriptionId, ['reception_no' => $receptionNo, 'parse_job_id' => $parseJobId]);
+        audit_log($tenantId, (int)$user['id'], 'prescription.create', 'prescriptions', $prescriptionId, [
+            'reception_no' => $receptionNo,
+            'parse_job_id' => $parseJobId,
+            'rule_summary' => class_exists('PrescriptionRuleEngineService') ? PrescriptionRuleEngineService::summarize($ruleChecks ?? []) : [],
+        ]);
         $pdo->commit();
         return $prescriptionId;
     } catch (Throwable $e) {
@@ -694,6 +709,15 @@ function get_prescription(int $tenantId, int $id): ?array
         $prescription['selected_fields'] = $fieldStmt->fetchAll();
     } else {
         $prescription['selected_fields'] = [];
+    }
+
+    try {
+        $prescription['rule_checks'] = (new PrescriptionRuleEngineService())->loadRuleChecks($tenantId, $id);
+        if (!$prescription['rule_checks']) {
+            $prescription['rule_checks'] = (new PrescriptionRuleEngineService())->evaluateSavedPrescription($prescription);
+        }
+    } catch (Throwable) {
+        $prescription['rule_checks'] = [];
     }
 
     return $prescription;

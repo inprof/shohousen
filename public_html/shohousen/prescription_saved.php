@@ -67,8 +67,33 @@ View::header('確定保存完了');
     </div>
   <?php endif; ?>
 
+  <?php $ruleChecks = (array)($prescription['rule_checks'] ?? []); $ruleSummary = PrescriptionRuleEngineService::summarize($ruleChecks); ?>
+  <?php if ($ruleChecks): ?>
+    <h2>処方箋受付ルール判定</h2>
+    <div class="rule-summary saved-rule-summary">
+      <span class="rule-badge danger">重要 <?= h((string)($ruleSummary['block'] + $ruleSummary['danger'])) ?></span>
+      <span class="rule-badge warning">確認 <?= h((string)$ruleSummary['warning']) ?></span>
+      <span class="rule-badge info">参考 <?= h((string)$ruleSummary['info']) ?></span>
+      <?php if ($ruleSummary['requires_inquiry'] > 0): ?><span class="rule-badge inquiry">疑義照会候補 <?= h((string)$ruleSummary['requires_inquiry']) ?></span><?php endif; ?>
+    </div>
+    <div class="rule-check-list compact">
+      <?php foreach ($ruleChecks as $check): ?>
+        <?php $sev = (string)($check['severity'] ?? 'info'); ?>
+        <article class="rule-check-item <?= h($sev) ?>">
+          <strong><?= h((string)($check['title'] ?? '確認項目')) ?></strong>
+          <p><?= h((string)($check['message'] ?? '')) ?></p>
+          <div class="rule-check-meta">
+            <?php if (!empty($check['recommended_action'])): ?><span>対応: <?= h((string)$check['recommended_action']) ?></span><?php endif; ?>
+            <?php if (!empty($check['requires_inquiry'])): ?><span class="attention">疑義照会候補</span><?php endif; ?>
+            <?php if (!empty($check['blocks_qr'])): ?><span class="attention">QR前確認</span><?php endif; ?>
+          </div>
+        </article>
+      <?php endforeach; ?>
+    </div>
+  <?php endif; ?>
+
   <div class="alert info saved-qr-note">
-    QRはまだ作成していません。下の「QR作成へ進む」を押すと、保存済みDBデータと「使用」にした読み取り項目からQR用中間データを生成します。
+    QRはまだ作成していません。下の「QR作成へ進む」を押すと、保存済みDBデータと「使用」にした読み取り項目からQR用中間データを生成します。重要判定がある場合はQR作成前に内容を確認してください。
   </div>
 
   <div class="button-row end sticky-save-actions">
