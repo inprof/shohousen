@@ -1,0 +1,29 @@
+{
+  "source": {
+    "name": "Wareki_Seireki_Hyo.pdf",
+    "type": "uploaded_pdf",
+    "note": "処方箋OCRの日付正規化用。元号年と西暦の対応、改元日を保持する。"
+  },
+  "rules": {
+    "date_storage_format": "YYYY-MM-DD",
+    "keep_raw_value": true,
+    "ambiguous_two_digit_year": "needs_human_check",
+    "unknown_era": "needs_human_check",
+    "era_start_date_validation": true,
+    "era_end_date_validation": true
+  },
+  "eras": [
+    {"key":"meiji","kanji":"明治","symbols":["M","m","明"],"base_year":1867,"start_date":"1868-01-25","end_date":"1912-07-30","first_year_label":"明治元年"},
+    {"key":"taisho","kanji":"大正","symbols":["T","t","大"],"base_year":1911,"start_date":"1912-07-30","end_date":"1926-12-25","first_year_label":"大正元年"},
+    {"key":"showa","kanji":"昭和","symbols":["S","s","昭"],"base_year":1925,"start_date":"1926-12-25","end_date":"1989-01-07","first_year_label":"昭和元年"},
+    {"key":"heisei","kanji":"平成","symbols":["H","h","平"],"base_year":1988,"start_date":"1989-01-08","end_date":"2019-04-30","first_year_label":"平成元年"},
+    {"key":"reiwa","kanji":"令和","symbols":["R","r","令"],"base_year":2018,"start_date":"2019-05-01","end_date":null,"first_year_label":"令和元年"}
+  ],
+  "supported_examples": [
+    {"raw":"昭和16年3月27日","normalized":"1941-03-27"},
+    {"raw":"S16.3.27","normalized":"1941-03-27"},
+    {"raw":"令和6年1月20日","normalized":"2024-01-20"},
+    {"raw":"R6/1/20","normalized":"2024-01-20"},
+    {"raw":"16-03-27","normalized":null,"status":"ambiguous_two_digit_year"}
+  ]
+}

@@ -55,27 +55,22 @@ function normalize_prescription_date_value(mixed $value): ?string
     if ($raw === '') {
         return null;
     }
+    if (class_exists('PrescriptionReferenceRuleService')) {
+        $result = PrescriptionReferenceRuleService::normalizeDate($raw);
+        return is_string($result['normalized'] ?? null) && $result['normalized'] !== '' ? (string)$result['normalized'] : null;
+    }
 
+    // Fallback only. 通常はPrescriptionReferenceRuleServiceの和暦JSONルールを使う。
     $ascii = mb_convert_kana($raw, 'as');
     $ascii = str_replace(['年', '月', '日', '.', '／', '　'], ['/', '/', '', '/', '/', ' '], $ascii);
     $ascii = preg_replace('/\s+/', '', $ascii) ?? $ascii;
 
-    if (preg_match('/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/', $ascii, $m)) {
-        $y = (int)$m[1]; $mo = (int)$m[2]; $d = (int)$m[3];
-        return checkdate($mo, $d, $y) ? sprintf('%04d-%02d-%02d', $y, $mo, $d) : null;
-    }
-    if (preg_match('/^(\d{4})(\d{2})(\d{2})$/', $ascii, $m)) {
+    if (preg_match('/^(\d{4})[-\/](\d{1,2})[-\/](\d{1,2})$/', $ascii, $m) || preg_match('/^(\d{4})(\d{2})(\d{2})$/', $ascii, $m)) {
         $y = (int)$m[1]; $mo = (int)$m[2]; $d = (int)$m[3];
         return checkdate($mo, $d, $y) ? sprintf('%04d-%02d-%02d', $y, $mo, $d) : null;
     }
 
-    $eraBases = [
-        '明治' => 1867, 'M' => 1867, 'm' => 1867,
-        '大正' => 1911, 'T' => 1911, 't' => 1911,
-        '昭和' => 1925, 'S' => 1925, 's' => 1925,
-        '平成' => 1988, 'H' => 1988, 'h' => 1988,
-        '令和' => 2018, 'R' => 2018, 'r' => 2018,
-    ];
+    $eraBases = ['明治' => 1867, 'M' => 1867, 'm' => 1867, '大正' => 1911, 'T' => 1911, 't' => 1911, '昭和' => 1925, 'S' => 1925, 's' => 1925, '平成' => 1988, 'H' => 1988, 'h' => 1988, '令和' => 2018, 'R' => 2018, 'r' => 2018];
     if (preg_match('/^(明治|大正|昭和|平成|令和|[MTSHRmtshr])(?:元|(\d{1,2}))[年\/.-]?(\d{1,2})[月\/.-]?(\d{1,2})日?$/u', $ascii, $m)) {
         $era = $m[1];
         $yearInEra = ($m[2] ?? '') === '' ? 1 : (int)$m[2];
@@ -84,8 +79,19 @@ function normalize_prescription_date_value(mixed $value): ?string
         $d = (int)$m[4];
         return checkdate($mo, $d, $y) ? sprintf('%04d-%02d-%02d', $y, $mo, $d) : null;
     }
-
     return null;
+}
+
+function normalize_prescription_code_value(string $type, mixed $value): string
+{
+    $raw = trim((string)$value);
+    if ($raw === '') {
+        return '';
+    }
+    if (class_exists('PrescriptionReferenceRuleService')) {
+        return PrescriptionReferenceRuleService::normalizedCodeOrRaw($type, $raw);
+    }
+    return $raw;
 }
 
 function find_or_create_patient(int $tenantId, array $input): int
@@ -95,7 +101,7 @@ function find_or_create_patient(int $tenantId, array $input): int
     if ($name === '') {
         throw new RuntimeException('患者名が空です。');
     }
-    $birthDate = normalize_prescription_date_value($input['birth_date'] ?? '') ?? (($input['birth_date'] ?? '') ?: null);
+    $birthDate = normalize_prescription_date_value($input['birth_date'] ?? '');
     $stmt = $pdo->prepare('SELECT id FROM patients WHERE name = :name AND birth_date <=> :birth_date LIMIT 1');
     $stmt->execute([':name' => $name, ':birth_date' => $birthDate]);
     $id = $stmt->fetchColumn();
@@ -119,7 +125,7 @@ function find_or_create_medical_institution(int $tenantId, array $input): ?int
     if ($name === '') {
         return null;
     }
-    $code = trim((string)($input['medical_institution_code'] ?? ''));
+    $code = normalize_prescription_code_value('medical_institution_code', $input['medical_institution_code'] ?? '');
 
     if ($code !== '') {
         $stmt = $pdo->prepare('SELECT id FROM medical_institutions WHERE institution_code = :code OR name = :name LIMIT 1');
@@ -506,9 +512,9 @@ function create_prescription_from_post(array $user, array $post): int
             ':patient_id' => $patientId,
             ':medical_institution_id' => $medicalId,
             ':reception_no' => $receptionNo,
-            ':issued_on' => normalize_prescription_date_value($post['issued_on'] ?? '') ?? (($post['issued_on'] ?? '') ?: null),
+            ':issued_on' => normalize_prescription_date_value($post['issued_on'] ?? ''),
             ':status' => 'completed',
-            ':insurance_no' => $post['insurance_no'] ?? null,
+            ':insurance_no' => normalize_prescription_code_value('insurance_no', $post['insurance_no'] ?? '' ) ?: null,
             ':insured_symbol_number' => $post['insured_symbol_number'] ?? null,
             ':copay_rate' => $post['copay_rate'] ?? null,
             ':source_type' => $parseJobId ? 'camera' : 'demo',

@@ -113,13 +113,9 @@ final class DrugNameMasterService
         if (!$candidates) {
             return $med;
         }
-        $best = $candidates[0];
-        if (trim((string)($med['generic_name'] ?? '')) === '') {
-            $med['generic_name'] = (string)($best['generic_prescription_name'] ?? '');
-        }
-        if (($med['name_relation'] ?? 'unknown') === 'unknown' && trim((string)($med['drug_name'] ?? '')) !== '' && trim((string)($med['generic_name'] ?? '')) !== '') {
-            $med['name_relation'] = 'generic_brand_pair';
-        }
+        // ここでは一般名を自動確定しない。
+        // 辞書候補を generic_name に書き込むと、処方箋に書かれていない一般名が
+        // 確定値/表示項目として出てしまうため、候補メタデータだけ保持する。
         $med['_generic_master_candidates'] = $candidates;
         return $med;
     }

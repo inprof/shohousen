@@ -62,6 +62,7 @@ final class PrescriptionRuleEngineService
         $checks = [];
         $this->ruleValidity($ctx, $checks);
         $this->ruleRequiredFields($ctx, $checks);
+        $this->ruleReferenceCodeFormats($ctx, $checks);
         $this->ruleMedicationCompleteness($ctx, $checks);
         $this->ruleConfidence($ctx, $checks);
         $this->ruleChangeDisallowedAndPatientRequest($ctx, $checks);
@@ -132,6 +133,61 @@ final class PrescriptionRuleEngineService
             }
             $severity = in_array($key, ['patient.name', 'medical_institution.name'], true) ? 'danger' : 'warning';
             $this->add($checks, 'RX_REQUIRED_FIELD_MISSING', $severity, $label . 'が未確認です', $label . 'が空欄または読取不可です。処方箋受付・QR出力前に人間確認してください。', $group, $key, '', '画像を確認し、読めない場合は手入力または薬剤師確認へ回してください。', false, $severity === 'danger', 100);
+        }
+    }
+
+    private function ruleReferenceCodeFormats(array $ctx, array &$checks): void
+    {
+        if (!class_exists('PrescriptionReferenceRuleService')) {
+            return;
+        }
+
+        $insuranceNo = (string)($ctx['insurance']['insurance_no'] ?? '');
+        if (trim($insuranceNo) !== '') {
+            $result = PrescriptionReferenceRuleService::validateCode('insurance_no', $insuranceNo);
+            if (empty($result['valid'])) {
+                $this->add($checks, 'RX_INSURANCE_NO_INVALID_LENGTH', 'block', '保険者番号の桁数が不正です', '保険者番号は6桁または8桁です。OCRが10桁などを拾った場合は、記号番号・枝番・公費欄などを混ぜて読んでいる可能性があります。', 'insurance', 'insurance.insurance_no', (string)($result['raw'] ?? $insuranceNo), '原画像を確認し、保険者番号だけを6桁または8桁で修正してください。', false, true, 120);
+            } elseif (($result['classification'] ?? '') !== '') {
+                $this->add($checks, 'RX_INSURANCE_NO_FORMAT_OK', 'info', '保険者番号形式候補', '保険者番号の桁数は資料ルール上の形式に合っています。', 'insurance', 'insurance.insurance_no', (string)($result['digits'] ?? $insuranceNo) . ' / ' . (string)($result['classification'] ?? ''), '数字の読取が正しいか確認してください。', false, false, 940);
+            }
+        }
+
+        foreach ((array)$ctx['fields'] as $field) {
+            $label = (string)($field['field_label'] ?? '');
+            $key = (string)($field['field_key'] ?? '');
+            $value = trim((string)($field['field_value'] ?? $field['value'] ?? ''));
+            if ($value === '') {
+                continue;
+            }
+            $text = mb_strtolower($key . ' ' . $label);
+            $type = null;
+            $ruleCode = '';
+            $title = '';
+            $group = (string)($field['field_group'] ?? 'other');
+            if (str_contains($text, '公費') && str_contains($text, '負担者番号')) {
+                $type = 'public_payer_no';
+                $ruleCode = 'RX_PUBLIC_PAYER_NO_INVALID_LENGTH';
+                $title = '公費負担者番号の桁数が不正です';
+            } elseif (str_contains($text, '公費') && (str_contains($text, '受給者番号') || str_contains($text, '受給者'))) {
+                $type = 'public_beneficiary_no';
+                $ruleCode = 'RX_PUBLIC_BENEFICIARY_NO_INVALID_LENGTH';
+                $title = '公費負担医療の受給者番号の桁数が不正です';
+            } elseif (str_contains($text, '医療機関コード') || str_contains($text, '医療機関等コード')) {
+                $type = 'medical_institution_code';
+                $ruleCode = 'RX_MEDICAL_CODE_INVALID_LENGTH';
+                $title = '医療機関コードの桁数を確認してください';
+            } elseif (str_contains($text, '薬局コード')) {
+                $type = 'pharmacy_code';
+                $ruleCode = 'RX_PHARMACY_CODE_INVALID_LENGTH';
+                $title = '薬局コードの桁数を確認してください';
+            }
+            if ($type === null) {
+                continue;
+            }
+            $result = PrescriptionReferenceRuleService::validateCode($type, $value);
+            if (empty($result['valid'])) {
+                $this->add($checks, $ruleCode, 'warning', $title, (string)($result['message'] ?? 'コード形式を確認してください。'), $group, $key, (string)($result['raw'] ?? $value), '原画像を確認し、該当番号だけを正しい桁数で修正してください。', false, false, 125);
+            }
         }
     }
 

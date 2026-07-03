@@ -139,18 +139,22 @@ final class OpenAiPrescriptionClient
 患者情報、保険情報、医療機関情報、処方薬情報を抽出します。
 処方箋の様式は医療機関・拠点ごとに異なるため、固定テンプレートだけに寄せず、画像内に見える項目名と値をできる限り form_fields に列挙してください。
 form_fields には、空欄でも帳票上に存在する主要項目を入れてください。例: 公費負担者番号、公費負担医療の受給者番号、保険者番号、被保険者証の記号番号、患者氏名、フリガナ、生年月日、性別、区分、交付年月日、処方箋使用期間、医療機関所在地、医療機関名、電話番号、保険医氏名、都道府県番号、点数表番号、医療機関コード、備考、保険医署名、記名押印、変更不可（医療上必要）、後発品変更不可、患者希望、先発医薬品患者希望、薬品名、用量、用法、日数、QR有無など。
+ただし、画像上に実際に書かれていない一般名候補・商品名候補・薬品名元テキスト・辞書候補・推定候補は、form_fieldsには出さないでください。これらは画面表示項目ではなく、medications内または後処理辞書の補助データとして扱います。
 画面側では field_group と value_type を見て、form_fields から修正用の入力一覧を動的に生成します。画像内に見える項目は、固定項目に入らなくても form_fields に残してください。
 source_section には、上部左、上部右、患者欄、保険欄、医療機関欄、処方欄、備考欄、下部QRなど、帳票上の位置が分かる表現を入れてください。これは拠点別レイアウト学習に使います。
 出力に使うかどうかは人間が後で選択するため、include_default は「通常出力に使いそうな項目」だけ true にし、それ以外も form_fields には残してください。
 出力は必ず指定JSON Schemaに従い、余計な文章を含めないでください。
 数字、日付、薬品名、用法、日数は特に慎重に扱ってください。
+日付は西暦4桁または和暦（明治/大正/昭和/平成/令和、M/T/S/H/R）を認識してください。2桁年だけの場合は西暦・和暦を推測で確定せずneeds_human_check=trueにしてください。
+保険者番号は6桁または8桁のみです。10桁などで読めた場合は、別欄の番号を混ぜている可能性が高いため、保険者番号として確定せずneeds_human_check=trueにしてください。
+公費負担者番号は8桁、公費負担医療の受給者番号は7桁です。医療機関等コードは通常7桁、都道府県番号+点数表番号付きなら10桁候補として扱ってください。
 薬品名や用法が読みにくい場合はneeds_human_check=trueにしてください。
 手書き、薄い印字、小さい文字、ぼけ、にじみ、影、罫線被り、低解像度で読みにくい箇所は、推測で確定せずreasonへ「手書き疑い」「薄い印字」「ぼけ」「にじみ」「小さい文字」などの視覚的理由を短く残してください。これは文字品質の補助学習に使います。
 印字と手書きが混在する場合、手書きらしい値は信頼度を下げ、候補として残しneeds_human_check=trueにしてください。
 処方箋受付ルール判定のため、「変更不可（医療上必要）」「後発品変更不可」「患者希望」「保険医署名」「記名押印」は、見える場合必ずform_fieldsへ入れてください。チェック欄はvalue_type=booleanにし、チェックありなら「有」、チェックなし/空欄なら空文字にしてください。変更不可欄と患者希望欄が同時に見える場合も、推測で片方を消さず、読めたまま返してください。
 薬品名については、一般名・商品名・販売名・後発品名・先発品名・屋号違いをできるだけ区別してください。
 同じ処方ブロック内に商品名と一般名が併記されている場合は、別薬として分けず、原則1つのmedications要素にまとめてください。
-その場合、drug_nameには薬局で表示・保存したい代表名、generic_nameには一般名候補、brand_nameには商品名候補、raw_drug_textには画像内で読めた薬品名行を改行区切りで入れてください。
+その場合、drug_nameには薬局で表示・保存したい代表名を入れてください。generic_nameとbrand_nameは画像内に明確に書かれている場合だけ入れ、辞書照合で推定しただけなら空文字にしてください。raw_drug_textは補助学習用なので、画面表示用のform_fieldsには出さず、medications内だけに保持してください。
 同一薬か別薬か判断できない場合は、分けてもよいですが name_relation="multiple_candidates" とし、needs_human_check=trueにしてください。
 {$template}{$learningHints}
 PROMPT;
@@ -280,6 +284,7 @@ PROMPT;
     {
         $normalized = array_replace_recursive(self::blankNormalized(), $value);
         $normalized['medications'] = self::normalizeMedications(is_array($normalized['medications'] ?? null) ? $normalized['medications'] : []);
+        $normalized = self::applyReferenceNormalizers($normalized);
         $normalized['form_fields'] = self::normalizeFormFields($normalized);
         return $normalized;
     }
@@ -318,6 +323,47 @@ PROMPT;
             'warnings' => ['demo data'],
             'overall_confidence' => 91.2,
         ]);
+    }
+
+    /** @param array<string,mixed> $normalized @return array<string,mixed> */
+    private static function applyReferenceNormalizers(array $normalized): array
+    {
+        if (class_exists('PrescriptionReferenceRuleService')) {
+            foreach ([['patient','birth_date'], ['prescription','issued_on'], ['prescription','expires_on']] as [$section, $key]) {
+                $raw = (string)($normalized[$section][$key] ?? '');
+                if ($raw === '') {
+                    continue;
+                }
+                $date = PrescriptionReferenceRuleService::normalizeDate($raw);
+                if (is_string($date['normalized'] ?? null) && $date['normalized'] !== '') {
+                    $normalized[$section][$key] = (string)$date['normalized'];
+                }
+                if (!empty($date['needs_human_check'])) {
+                    $normalized[$section]['needs_human_check'] = true;
+                    $normalized['warnings'][] = ($section . '.' . $key . ': ' . (string)($date['message'] ?? '日付要確認'));
+                }
+            }
+            if ((string)($normalized['insurance']['insurance_no'] ?? '') !== '') {
+                $code = PrescriptionReferenceRuleService::validateCode('insurance_no', (string)$normalized['insurance']['insurance_no']);
+                if (!empty($code['valid'])) {
+                    $normalized['insurance']['insurance_no'] = (string)$code['digits'];
+                } else {
+                    $normalized['insurance']['needs_human_check'] = true;
+                    $normalized['warnings'][] = '保険者番号: ' . (string)($code['message'] ?? '形式要確認');
+                }
+            }
+            if ((string)($normalized['medical_institution']['code'] ?? '') !== '') {
+                $code = PrescriptionReferenceRuleService::validateCode('medical_institution_code', (string)$normalized['medical_institution']['code']);
+                if (!empty($code['valid'])) {
+                    $normalized['medical_institution']['code'] = (string)$code['digits'];
+                } else {
+                    $normalized['medical_institution']['needs_human_check'] = true;
+                    $normalized['warnings'][] = '医療機関コード: ' . (string)($code['message'] ?? '形式要確認');
+                }
+            }
+        }
+        $normalized['warnings'] = array_values(array_unique(array_filter(array_map('strval', (array)($normalized['warnings'] ?? [])))));
+        return $normalized;
     }
 
     /** @param array<int,mixed> $medications @return array<int,array<string,mixed>> */
@@ -363,7 +409,7 @@ PROMPT;
     {
         $fields = [];
         foreach (($normalized['form_fields'] ?? []) as $field) {
-            if (!is_array($field)) {
+            if (!is_array($field) || self::isLearningOnlyFormField($field)) {
                 continue;
             }
             $fields[] = self::normalizeFormField($field);
@@ -407,9 +453,6 @@ PROMPT;
             $n = $i + 1;
             $conf = $med['confidence'] ?? 0;
             $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_drug_name', 'field_label' => '処方' . $n . ' 薬品名', 'field_group' => 'medication', 'value' => (string)($med['drug_name'] ?? ''), 'value_type' => 'drug', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => trim((string)($med['drug_name'] ?? '')) !== '', 'output_candidate' => true, 'reason' => 'structured_medication']);
-            $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_generic_name', 'field_label' => '処方' . $n . ' 一般名候補', 'field_group' => 'medication', 'value' => (string)($med['generic_name'] ?? ''), 'value_type' => 'drug', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => false, 'output_candidate' => true, 'reason' => 'structured_medication_generic']);
-            $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_brand_name', 'field_label' => '処方' . $n . ' 商品名候補', 'field_group' => 'medication', 'value' => (string)($med['brand_name'] ?? ''), 'value_type' => 'drug', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => false, 'output_candidate' => true, 'reason' => 'structured_medication_brand']);
-            $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_raw_drug_text', 'field_label' => '処方' . $n . ' 薬品名元テキスト', 'field_group' => 'medication', 'value' => (string)($med['raw_drug_text'] ?? ''), 'value_type' => 'text', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => false, 'output_candidate' => true, 'reason' => 'structured_medication_raw']);
             $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_dose', 'field_label' => '処方' . $n . ' 用量', 'field_group' => 'medication', 'value' => (string)($med['dose_text'] ?? ''), 'value_type' => 'amount', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => trim((string)($med['dose_text'] ?? '')) !== '', 'output_candidate' => true, 'reason' => 'structured_medication']);
             $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_usage', 'field_label' => '処方' . $n . ' 用法', 'field_group' => 'medication', 'value' => (string)($med['usage_text'] ?? ''), 'value_type' => 'usage', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => trim((string)($med['usage_text'] ?? '')) !== '', 'output_candidate' => true, 'reason' => 'structured_medication']);
             $fields[] = self::normalizeFormField(['field_key' => 'medication_' . $n . '_days', 'field_label' => '処方' . $n . ' 日数', 'field_group' => 'medication', 'value' => (string)($med['days_count'] ?? ''), 'value_type' => 'number', 'source_section' => '処方欄', 'confidence' => $conf, 'needs_human_check' => true, 'include_default' => ($med['days_count'] ?? '') !== '', 'output_candidate' => true, 'reason' => 'structured_medication']);
@@ -434,6 +477,21 @@ PROMPT;
         });
 
         return $out;
+    }
+
+    /** @param array<string,mixed> $field */
+    private static function isLearningOnlyFormField(array $field): bool
+    {
+        $key = mb_strtolower((string)($field['field_key'] ?? ''));
+        $label = mb_strtolower((string)($field['field_label'] ?? ''));
+        $reason = mb_strtolower((string)($field['reason'] ?? ''));
+        $text = $key . ' ' . $label . ' ' . $reason;
+        foreach (['raw_drug_text', '薬品名元テキスト', '元テキスト', 'generic_name', '一般名候補', 'brand_name', '商品名候補', 'relation_type', '薬品名の関係', 'drug_name_relation', 'name_relation', '辞書候補'] as $needle) {
+            if (str_contains($text, mb_strtolower($needle))) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** @param array<string,mixed> $field */

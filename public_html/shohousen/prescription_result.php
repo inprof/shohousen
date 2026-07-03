@@ -84,6 +84,22 @@ function canonical_review_key(array $field): string
     return $key !== 'field' ? $key : normalize_review_key($label);
 }
 
+function is_learning_only_review_field(array $field): bool
+{
+    $text = mb_strtolower(implode(' ', [
+        (string)($field['field_key'] ?? ''),
+        (string)($field['field_label'] ?? ''),
+        (string)($field['source_section'] ?? ''),
+        (string)($field['reason'] ?? ''),
+    ]));
+    foreach (['raw_drug_text', '薬品名元テキスト', '元テキスト', 'generic_name', '一般名候補', 'brand_name', '商品名候補', 'relation_type', '薬品名の関係', 'drug_name_relation', 'name_relation', '辞書候補'] as $needle) {
+        if (str_contains($text, mb_strtolower($needle))) {
+            return true;
+        }
+    }
+    return false;
+}
+
 /** @param array<string,array<string,mixed>> $rows */
 function upsert_review_field(array &$rows, array $field): void
 {
@@ -130,6 +146,31 @@ function upsert_review_field(array &$rows, array $field): void
         $rows[$key]['source_section'] = $row['source_section'];
     }
     $rows[$key]['display_order'] = min((int)$rows[$key]['display_order'], (int)$row['display_order']);
+}
+
+function medication_visible_support_value(array $med, string $key): string
+{
+    $value = trim((string)($med[$key] ?? ''));
+    if ($value === '') {
+        return '';
+    }
+    $raw = trim((string)($med['raw_drug_text'] ?? ''));
+    $relation = (string)($med['name_relation'] ?? 'unknown');
+    $joined = mb_strtolower($raw . "\n" . (string)($med['drug_name'] ?? ''));
+    $needle = mb_strtolower($value);
+
+    // 候補辞書から推定しただけの一般名/商品名を確定値として保存しない。
+    // 処方箋画像上にその文字列・【般】・一般名表記が見えている場合だけ保持する。
+    if ($raw !== '' && ($needle !== '' && str_contains($joined, $needle))) {
+        return $value;
+    }
+    if ($key === 'generic_name' && preg_match('/【般】|\[般\]|一般名|般名/u', $raw)) {
+        return $value;
+    }
+    if ($relation === 'generic_brand_pair' && $raw !== '') {
+        return $value;
+    }
+    return '';
 }
 
 function render_dynamic_value_control(string $name, string $value, string $uiTemplate, string $valueType, string $fieldKey): string
@@ -193,7 +234,7 @@ foreach ($fixedDefinitions as [$key, $label, $group, $value, $valueType, $uiTemp
     ]);
 }
 foreach ($dynamicFields as $i => $field) {
-    if (!is_array($field)) {
+    if (!is_array($field) || is_learning_only_review_field($field)) {
         continue;
     }
     $field['display_order'] = $field['display_order'] ?? (1000 + $i);
@@ -404,7 +445,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   </section>
 
   <h2>処方薬情報（<?= count($medications) ?>件）</h2>
-  <p class="form-help">一般名・商品名・元の読み取り行も補助学習対象として保存します。商品名と一般名が同じ処方内に併記されている場合は、1つの薬品行にまとめてください。</p>
+  <p class="form-help">画面では処方箋上で確認・修正すべき薬品名、用法、日数、総量だけを表示します。一般名候補・商品名候補・薬品名元テキストなどの補助学習用データは画面に出さず、内部で保持します。</p>
   <div class="edit-med-list" data-med-list>
     <?php foreach ($medications as $i => $med): $drugCandidates = $candidates['medications'][$i]['drug_name'] ?? []; ?>
       <div class="edit-med-row ocr-med-row">
@@ -418,22 +459,9 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
             <small class="candidate-note">候補: <?= h(implode(' / ', array_map(fn($c) => $c['candidate_value'] . '（' . $c['score'] . '）', $drugCandidates))) ?></small>
           <?php endif; ?>
         </label>
-        <label>一般名候補<input name="generic_name[]" value="<?= h((string)($med['generic_name'] ?? '')) ?>" placeholder="例: アンブロキソール塩酸塩"></label>
-        <label>商品名候補<input name="brand_name[]" value="<?= h((string)($med['brand_name'] ?? '')) ?>" placeholder="例: ムコソルバン錠"></label>
-        <details class="med-learning-details">
-          <summary>補助学習用の薬品名元テキストを確認</summary>
-          <label class="med-field-raw">薬品名元テキスト
-            <textarea name="raw_drug_text[]" rows="3" placeholder="AIが読んだ薬品名行。一般名・商品名を改行で残せます。\n例: ムコソルバン錠15mg\n【般】アンブロキソール塩酸塩錠15mg"><?= h((string)($med['raw_drug_text'] ?? ($med['drug_name'] ?? ''))) ?></textarea>
-          </label>
-          <?php if (!empty($med['_generic_master_candidates'])): ?>
-            <div class="generic-master-hints">
-              <strong>一般名処方マスタ候補</strong>
-              <?php foreach ((array)$med['_generic_master_candidates'] as $candidate): ?>
-                <span><?= h((string)($candidate['generic_prescription_name'] ?? '')) ?><?= !empty($candidate['ingredient_name']) ? ' / ' . h((string)$candidate['ingredient_name']) : '' ?></span>
-              <?php endforeach; ?>
-            </div>
-          <?php endif; ?>
-        </details>
+        <input type="hidden" name="generic_name[]" value="<?= h(medication_visible_support_value($med, 'generic_name')) ?>">
+        <input type="hidden" name="brand_name[]" value="<?= h(medication_visible_support_value($med, 'brand_name')) ?>">
+        <input type="hidden" name="raw_drug_text[]" value="<?= h((string)($med['raw_drug_text'] ?? ($med['drug_name'] ?? ''))) ?>">
         <label>用法<input name="usage_text[]" value="<?= h((string)($med['usage_text'] ?? '')) ?>"></label>
         <label>日数<input type="number" name="days_count[]" value="<?= h((string)($med['days_count'] ?? '')) ?>"></label>
         <label>総量/備考<input name="amount_text[]" value="<?= h((string)($med['amount_text'] ?? '')) ?>"></label>
@@ -444,14 +472,8 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
             <?php endforeach; ?>
           </select>
         </label>
-        <label>薬品名の関係
-          <select name="drug_name_relation_type[]">
-            <?php $rel = (string)($med['name_relation'] ?? 'unknown'); ?>
-            <?php foreach (['single'=>'単独薬品名','generic_brand_pair'=>'一般名・商品名の併記','multiple_candidates'=>'複数候補/要整理','unknown'=>'不明'] as $key => $label): ?>
-              <option value="<?= h($key) ?>" <?= $key === $rel ? 'selected' : '' ?>><?= h($label) ?></option>
-            <?php endforeach; ?>
-          </select>
-        </label>
+        <?php $rel = (string)($med['name_relation'] ?? 'unknown'); ?>
+        <input type="hidden" name="drug_name_relation_type[]" value="<?= h(in_array($rel, ['single','generic_brand_pair','multiple_candidates','unknown'], true) ? $rel : 'unknown') ?>">
         <input type="hidden" name="ai_drug_name[]" value="<?= h((string)($med['drug_name'] ?? '')) ?>">
         <input type="hidden" name="ai_generic_name[]" value="<?= h((string)($med['generic_name'] ?? '')) ?>">
         <input type="hidden" name="ai_brand_name[]" value="<?= h((string)($med['brand_name'] ?? '')) ?>">
@@ -468,14 +490,14 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     <div class="edit-med-row ocr-med-row">
       <span class="row-no">__NO__</span>
       <label class="med-field-main">薬品名（代表名）<textarea name="drug_name[]" rows="2" placeholder="保存する代表薬品名"></textarea></label>
-      <label>一般名候補<input name="generic_name[]" value="" placeholder="一般名候補"></label>
-      <label>商品名候補<input name="brand_name[]" value="" placeholder="商品名候補"></label>
-      <details class="med-learning-details"><summary>補助学習用の薬品名元テキストを確認</summary><label class="med-field-raw">薬品名元テキスト<textarea name="raw_drug_text[]" rows="3" placeholder="AI読み取り行や追加入力を残します"></textarea></label></details>
+      <input type="hidden" name="generic_name[]" value="">
+      <input type="hidden" name="brand_name[]" value="">
+      <input type="hidden" name="raw_drug_text[]" value="">
       <label>用法<input name="usage_text[]" value=""></label>
       <label>日数<input type="number" name="days_count[]" value=""></label>
       <label>総量/備考<input name="amount_text[]" value=""></label>
       <label>在庫<select name="stock_status[]"><option value="unknown" selected>未確認</option><option value="adopted">採用薬</option><option value="in_stock">在庫あり</option><option value="low_stock">在庫僅少</option><option value="not_stocked">未採用</option></select></label>
-      <label>薬品名の関係<select name="drug_name_relation_type[]"><option value="unknown" selected>不明</option><option value="single">単独薬品名</option><option value="generic_brand_pair">一般名・商品名の併記</option><option value="multiple_candidates">複数候補/要整理</option></select></label>
+      <input type="hidden" name="drug_name_relation_type[]" value="unknown">
       <input type="hidden" name="ai_drug_name[]" value="">
       <input type="hidden" name="ai_generic_name[]" value="">
       <input type="hidden" name="ai_brand_name[]" value="">
