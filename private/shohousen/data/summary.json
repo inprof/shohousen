@@ -1,0 +1,37 @@
+{
+  "created_at": "2026-07-03",
+  "sources": {
+    "y_r07": "y_r07_ALL20260317.csv",
+    "hot9": "h20260531/MEDIS20260531_HOT9.TXT",
+    "ippan_generic_master": "ippanmeishohoumaster_260612.xlsx"
+  },
+  "counts": {
+    "y_r07_products": 19337,
+    "y_r07_products_with_generic_code": 8751,
+    "y_r07_unique_generic_codes": 1381,
+    "hot9_rows": 38362,
+    "ippan_master_generic_codes": 1230,
+    "ippan_exception_products": 66,
+    "merged_generic_groups": 1406,
+    "product_index_rows": 19337,
+    "relation_edges": 8751,
+    "aliases": 62858
+  },
+  "match_stats": {
+    "yj_to_generic_exact_yj9_plus_ZZZ": 8634,
+    "yj_to_generic_prefix8_exception_or_aggregate": 107,
+    "yj_to_generic_unmatched": 10,
+    "y_r07_yj_matched_hot9_individual_yj_code": 11816,
+    "y_r07_yj_matched_hot9_listed_yakka_code": 7236,
+    "y_r07_yj_no_hot9_match": 285,
+    "generic_master_codes_found_in_y_r07": 1205,
+    "generic_master_only_no_y_r07_product": 25,
+    "y_r07_generic_codes_not_in_ippan_master": 176
+  },
+  "recommended_code_policy": {
+    "do_not_match_by_prefix8_only": "prefix8 only is useful for broad grouping but can merge different variants. Use generic_code exact when present, then yj_code[:9]+ZZZ, then exception table, then prefix8 as fallback.",
+    "exact_relation_rule": "generic_code == yj_code[:9] + \"ZZZ\"",
+    "aggregate_exception_rule": "generic_code suffix such as AZZZ/BZZZ/CZZZ may group multiple YJ variants; use ippan exception sheet if available.",
+    "ocr_usage": "Use alias_normalized for candidate search; use relation_edges confidence for auto-suggest strength, not for automatic final confirmation."
+  }
+}

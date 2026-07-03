@@ -19,6 +19,18 @@ final class PrescriptionOcrService
         $start = microtime(true);
         $preprocessStart = microtime(true);
         $stored = $this->image->storeUploadedFile($file, $user);
+        $imageQuality = $this->image->analyzeStoredFile($stored);
+        $ocrStored = $stored;
+        $assistStored = null;
+        try {
+            $assistStored = $this->image->createOcrAssistImage($stored, $user, $imageQuality);
+            if (is_array($assistStored) && !empty($assistStored['path'])) {
+                $ocrStored = $assistStored;
+            }
+        } catch (Throwable) {
+            $assistStored = null;
+            $ocrStored = $stored;
+        }
         $preprocessMs = self::elapsedMs($preprocessStart);
 
         $pdo = Db::branch();
@@ -47,11 +59,36 @@ final class PrescriptionOcrService
             ':width' => $stored['width'],
             ':height' => $stored['height'],
         ]);
+        if (is_array($assistStored) && (int)($assistStored['storage_file_id'] ?? 0) > 0) {
+            $fileStmtAssist = $pdo->prepare('INSERT INTO prescription_parse_job_files
+                (parse_job_id, storage_file_id, file_role, width, height, created_at)
+                VALUES (:parse_job_id, :storage_file_id, "preprocessed", :width, :height, NOW())');
+            $fileStmtAssist->execute([
+                ':parse_job_id' => $jobId,
+                ':storage_file_id' => (int)$assistStored['storage_file_id'],
+                ':width' => $assistStored['width'],
+                ':height' => $assistStored['height'],
+            ]);
+        }
 
+        $stored['quality_analysis'] = $imageQuality;
+        if (is_array($assistStored)) {
+            $stored['ocr_assist_storage_file_id'] = (int)($assistStored['storage_file_id'] ?? 0);
+            $stored['ocr_assist_preprocess_profile'] = (string)($assistStored['preprocess_profile'] ?? 'assist');
+        }
         $this->saveCaptureQuality($jobId, $tenantId, $companyUid, $branchUid, $stored);
 
         $templateStart = microtime(true);
         $detectedTemplateMeta = $this->templateDetector->detectFromStored($stored);
+        $detectedTemplateMeta['quality_analysis'] = $imageQuality;
+        if (is_array($assistStored)) {
+            $detectedTemplateMeta['ocr_assist'] = [
+                'storage_file_id' => (int)($assistStored['storage_file_id'] ?? 0),
+                'preprocess_profile' => (string)($assistStored['preprocess_profile'] ?? 'assist'),
+                'width' => $assistStored['width'] ?? null,
+                'height' => $assistStored['height'] ?? null,
+            ];
+        }
         try {
             $this->knowledge->saveImageQualityLearning($jobId, $tenantId, $stored, $detectedTemplateMeta);
         } catch (Throwable) {
@@ -69,7 +106,7 @@ final class PrescriptionOcrService
         $openaiStart = microtime(true);
         try {
             $pdo->prepare('UPDATE prescription_parse_jobs SET status = "analyzing" WHERE id = :id')->execute([':id' => $jobId]);
-            $ai = $this->openai->extractFromImage($stored['path'], $stored['mime_type'], $template);
+            $ai = $this->openai->extractFromImage($ocrStored['path'], $ocrStored['mime_type'], $template);
             $openaiMs = self::elapsedMs($openaiStart);
             $correctionStart = microtime(true);
             $normalized = $this->correction->applyCandidates($ai['normalized']);
@@ -95,7 +132,7 @@ final class PrescriptionOcrService
                 'correction_ms' => $correctionMs,
                 'total_ms' => self::elapsedMs($start),
                 'image_bytes_before' => $stored['size'],
-                'image_bytes_after' => $stored['size'],
+                'image_bytes_after' => $ocrStored['size'],
                 'openai_model' => $ai['model'],
                 'image_detail' => (string)app_config('openai.vision_detail', 'high'),
             ]);
@@ -109,7 +146,7 @@ final class PrescriptionOcrService
                 'correction_ms' => 0,
                 'total_ms' => self::elapsedMs($start),
                 'image_bytes_before' => $stored['size'],
-                'image_bytes_after' => $stored['size'],
+                'image_bytes_after' => $ocrStored['size'],
                 'openai_model' => (string)app_config('openai.model', 'gpt-4o-mini'),
                 'image_detail' => (string)app_config('openai.vision_detail', 'high'),
             ]);

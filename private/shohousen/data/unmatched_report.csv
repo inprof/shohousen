@@ -1,0 +1,319 @@
+﻿type,drug_name,yj_code,expected_generic_code_from_yj,actual_generic_code,generic_name,match_type,exception_product_match
+non_exact_generic_relation,ＨＭ散,2339178B1040,2339178B1ZZZ,2339178BAZZZ,【般】ジアスターゼ・生薬等配合散,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,チモプトールＸＥ点眼液０．２５％,1319702Q3037,1319702Q3ZZZ,1319702QAZZZ,【般】チモロール点眼液０．２５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,チモプトールＸＥ点眼液０．５％,1319702Q4033,1319702Q4ZZZ,1319702QBZZZ,【般】チモロール点眼液０．５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ２０ｍｇ「日医工」　７ｃｍ×１０ｃｍ,2649729S2010,2649729S2ZZZ,2649729SAZZZ,【般】ケトプロフェンテープ２０ｍｇ（７×１０ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,セルタッチパップ７０　１０ｃｍ×１４ｃｍ,2649731S1143,2649731S1ZZZ,2649731SAZZZ,【般】フェルビナクパップ７０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,フェルビナクテープ７０ｍｇ「ＥＭＥＣ」　１０ｃｍ×１４ｃｍ,2649731S1178,2649731S1ZZZ,2649731SBZZZ,【般】フェルビナクテープ７０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,モーラステープＬ４０ｍｇ　１０ｃｍ×１４ｃｍ,2649729S3084,2649729S3ZZZ,2649729SCZZZ,【般】ケトプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モーラステープ２０ｍｇ　７ｃｍ×１０ｃｍ,2649729S2169,2649729S2ZZZ,2649729SAZZZ,【般】ケトプロフェンテープ２０ｍｇ（７×１０ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ゼポラステープ４０ｍｇ　１０ｃｍ×１４ｃｍ,2649732S2047,2649732S2ZZZ,2649732SBZZZ,【般】フルルビプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,ナゾネックス点鼻液５０μｇ５６噴霧用　５ｍｇ１０ｇ,1329710Q1027,1329710Q1ZZZ,1329710QAZZZ,【般】モメタゾン点鼻液５０μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ２０ｍｇ「ラクール」　７ｃｍ×１０ｃｍ,2649729S2010,2649729S2ZZZ,2649729SBZZZ,【般】ケトプロフェンテープ２０ｍｇ（７×１０ｃｍ温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ４０ｍｇ「ラクール」　１０ｃｍ×１４ｃｍ,2649729S3017,2649729S3ZZZ,2649729SDZZZ,【般】ケトプロフェンテープ４０ｍｇ（１０×１４ｃｍ温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ビオヂアスミンＦ－２散,2316012A1124,2316012A1ZZZ,2316012AAZZZ,【般】ラクトミン原末,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,ヒルドイドローション０．３％,3339950Q1074,3339950Q1ZZZ,3339950QAZZZ,【般】ヘパリン類似物質外用液０．３％（乳剤性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ４０ｍｇ「日医工」　１０ｃｍ×１４ｃｍ,2649729S3017,2649729S3ZZZ,2649729SCZZZ,【般】ケトプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,デパケンＲ錠２００ｍｇ,1139004G2063,1139004G2ZZZ,1139004GAZZZ,【般】バルプロ酸Ｎａ徐放錠２００ｍｇ,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,ＮＩＭ配合散,2339178B1075,2339178B1ZZZ,2339178BAZZZ,【般】ジアスターゼ・生薬等配合散,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ２０ｍｇ「三和」　７ｃｍ×１０ｃｍ,2649729S2010,2649729S2ZZZ,2649729SAZZZ,【般】ケトプロフェンテープ２０ｍｇ（７×１０ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ２０ｍｇ「ＳＮ」　７ｃｍ×１０ｃｍ,2649729S2240,2649729S2ZZZ,2649729SAZZZ,【般】ケトプロフェンテープ２０ｍｇ（７×１０ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フェルビナクパップ７０ｍｇ「ラクール」　１０ｃｍ×１４ｃｍ,2649731S1267,2649731S1ZZZ,2649731SAZZZ,【般】フェルビナクパップ７０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,フェルビナクテープ７０ｍｇ「ＮＰ」　１０ｃｍ×１４ｃｍ,2649731S1348,2649731S1ZZZ,2649731SBZZZ,【般】フェルビナクテープ７０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,フェルビナクパップ７０ｍｇ「東光」　１０ｃｍ×１４ｃｍ,2649731S1275,2649731S1ZZZ,2649731SAZZZ,【般】フェルビナクパップ７０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,ヤクバンテープ４０ｍｇ　１０ｃｍ×１４ｃｍ,2649732S2055,2649732S2ZZZ,2649732SBZZZ,【般】フルルビプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,ヘパリン類似物質ローション０．３％「日医工」,3339950Q1139,3339950Q1ZZZ,3339950QBZZZ,【般】ヘパリン類似物質外用液０．３％（水性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ヘパリン類似物質ローション０．３％「ＹＤ」,3339950Q1090,3339950Q1ZZZ,3339950QBZZZ,【般】ヘパリン類似物質外用液０．３％（水性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フェルビナクパップ７０ｍｇ「ユートク」　１０ｃｍ×１４ｃｍ,2649731S1291,2649731S1ZZZ,2649731SAZZZ,【般】フェルビナクパップ７０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,ケトプロフェンテープ２０ｍｇ「パテル」　７ｃｍ×１０ｃｍ,2649729S2010,2649729S2ZZZ,2649729SAZZZ,【般】ケトプロフェンテープ２０ｍｇ（７×１０ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ２０ｍｇ「トーワ」　７ｃｍ×１０ｃｍ,2649729S2010,2649729S2ZZZ,2649729SAZZZ,【般】ケトプロフェンテープ２０ｍｇ（７×１０ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ２０ｍｇ「ＢＭＤ」　７ｃｍ×１０ｃｍ,2649729S2010,2649729S2ZZZ,2649729SAZZZ,【般】ケトプロフェンテープ２０ｍｇ（７×１０ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ２０ｍｇ「東光」　７ｃｍ×１０ｃｍ,2649729S2010,2649729S2ZZZ,2649729SAZZZ,【般】ケトプロフェンテープ２０ｍｇ（７×１０ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フェルビナクテープ７０ｍｇ「久光」　１０ｃｍ×１４ｃｍ,2649731S1321,2649731S1ZZZ,2649731SBZZZ,【般】フェルビナクテープ７０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,フルルビプロフェンテープ４０ｍｇ「ＱＱ」　１０ｃｍ×１４ｃｍ,2649732S2071,2649732S2ZZZ,2649732SBZZZ,【般】フルルビプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,ケトプロフェンテープ４０ｍｇ「ＳＮ」　１０ｃｍ×１４ｃｍ,2649729S3173,2649729S3ZZZ,2649729SCZZZ,【般】ケトプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ヘパリン類似物質ローション０．３％「ラクール」,3339950Q1015,3339950Q1ZZZ,3339950QAZZZ,【般】ヘパリン類似物質外用液０．３％（乳剤性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ４０ｍｇ「東光」　１０ｃｍ×１４ｃｍ,2649729S3017,2649729S3ZZZ,2649729SCZZZ,【般】ケトプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,バルプロ酸ナトリウム徐放錠Ａ２００ｍｇ「トーワ」,1139004G2012,1139004G2ZZZ,1139004GAZZZ,【般】バルプロ酸Ｎａ徐放錠２００ｍｇ,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,ケトプロフェンテープ４０ｍｇ「パテル」　１０ｃｍ×１４ｃｍ,2649729S3017,2649729S3ZZZ,2649729SCZZZ,【般】ケトプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ４０ｍｇ「テイコク」　１０ｃｍ×１４ｃｍ,2649729S3017,2649729S3ZZZ,2649729SCZZZ,【般】ケトプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ４０ｍｇ「三和」　１０ｃｍ×１４ｃｍ,2649729S3017,2649729S3ZZZ,2649729SCZZZ,【般】ケトプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フェルビナクテープ７０ｍｇ「三笠」　１０ｃｍ×１４ｃｍ,2649731S1330,2649731S1ZZZ,2649731SBZZZ,【般】フェルビナクテープ７０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,ケトプロフェンテープ４０ｍｇ「ＢＭＤ」　１０ｃｍ×１４ｃｍ,2649729S3017,2649729S3ZZZ,2649729SCZZZ,【般】ケトプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,アラミスト点鼻液２７．５μｇ５６噴霧用　３ｍｇ６ｇ,1329711Q1021,1329711Q1ZZZ,1329711QAZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ナゾネックス点鼻液５０μｇ１１２噴霧用　９ｍｇ１８ｇ,1329710Q2023,1329710Q2ZZZ,1329710QBZZZ,【般】モメタゾン点鼻液５０μｇ１１２噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ４０ｍｇ「トーワ」　１０ｃｍ×１４ｃｍ,2649729S3017,2649729S3ZZZ,2649729SCZZZ,【般】ケトプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,セルタッチテープ７０　１０ｃｍ×１４ｃｍ,2649731S1232,2649731S1ZZZ,2649731SBZZZ,【般】フェルビナクテープ７０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,消毒用マルオアルコール,2619805X1066,2619805X1ZZZ,2619803XAZZZ,【般】消毒用アルコール配合外用液,unmatched,True
+non_exact_generic_relation,チモロールＸＥ点眼液０．２５％「ニットー」,1319702Q3061,1319702Q3ZZZ,1319702QAZZZ,【般】チモロール点眼液０．２５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,チモロールＸＥ点眼液０．５％「ニットー」,1319702Q4068,1319702Q4ZZZ,1319702QBZZZ,【般】チモロール点眼液０．５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,チモロールＸＥ点眼液０．２５％「杏林」,1319702Q3010,1319702Q3ZZZ,1319702QAZZZ,【般】チモロール点眼液０．２５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,チモロールＸＥ点眼液０．５％「杏林」,1319702Q4050,1319702Q4ZZZ,1319702QBZZZ,【般】チモロール点眼液０．５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,チモロールＸＥ点眼液０．５％「ＴＳ」,1319702Q4041,1319702Q4ZZZ,1319702QBZZZ,【般】チモロール点眼液０．５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,チモロールＸＥ点眼液０．２５％「ＴＳ」,1319702Q3045,1319702Q3ZZZ,1319702QAZZZ,【般】チモロール点眼液０．２５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ヘパリン類似物質ローション,3339950Q1015,3339950Q1ZZZ,3339950QAZZZ,【般】ヘパリン類似物質外用液０．３％（乳剤性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ヘパリン類似物質ローション０．３％「ニットー」,3339950Q1112,3339950Q1ZZZ,3339950QBZZZ,【般】ヘパリン類似物質外用液０．３％（水性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ヘパリン類似物質ローション０．３％「ニプロ」,3339950Q1104,3339950Q1ZZZ,3339950QBZZZ,【般】ヘパリン類似物質外用液０．３％（水性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ２０ｍｇ「杏林」　７ｃｍ×１０ｃｍ,2649729S2010,2649729S2ZZZ,2649729SAZZZ,【般】ケトプロフェンテープ２０ｍｇ（７×１０ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープ４０ｍｇ「杏林」　１０ｃｍ×１４ｃｍ,2649729S3017,2649729S3ZZZ,2649729SCZZZ,【般】ケトプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,チモロールマレイン酸塩０．２５％１ｍＬＸＥ点眼液,1319702Q3010,1319702Q3ZZZ,1319702QAZZZ,【般】チモロール点眼液０．２５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「杏林」５６噴霧用　５ｍｇ１０ｇ,1329710Q1035,1329710Q1ZZZ,1329710QAZZZ,【般】モメタゾン点鼻液５０μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「杏林」１１２噴霧用　９ｍｇ１８ｇ,1329710Q2031,1329710Q2ZZZ,1329710QBZZZ,【般】モメタゾン点鼻液５０μｇ１１２噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,アラミスト点鼻液２７．５μｇ１２０噴霧用　５ｍｇ１０ｇ,1329711Q2028,1329711Q2ZZZ,1329711QBZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ１２０噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「ＭＹＬ」５６噴霧用　３．５ｍｇ７ｇ,1329710Q3020,1329710Q3ZZZ,1329710QAZZZ,【般】モメタゾン点鼻液５０μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「ＭＹＬ」１１２噴霧用　６．５ｍｇ１３ｇ,1329710Q4026,1329710Q4ZZZ,1329710QBZZZ,【般】モメタゾン点鼻液５０μｇ１１２噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「タカタ」５６噴霧用　５ｍｇ１０ｇ,1329710Q1060,1329710Q1ZZZ,1329710QAZZZ,【般】モメタゾン点鼻液５０μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「タカタ」１１２噴霧用　９ｍｇ１８ｇ,1329710Q2066,1329710Q2ZZZ,1329710QBZZZ,【般】モメタゾン点鼻液５０μｇ１１２噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「トーワ」５６噴霧用　５ｍｇ１０ｇ,1329710Q1078,1329710Q1ZZZ,1329710QAZZZ,【般】モメタゾン点鼻液５０μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「トーワ」１１２噴霧用　９ｍｇ１８ｇ,1329710Q2074,1329710Q2ZZZ,1329710QBZZZ,【般】モメタゾン点鼻液５０μｇ１１２噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「ＣＥＯ」５６噴霧用　５ｍｇ１０ｇ,1329710Q1043,1329710Q1ZZZ,1329710QAZZZ,【般】モメタゾン点鼻液５０μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「ＣＥＯ」１１２噴霧用　９ｍｇ１８ｇ,1329710Q2040,1329710Q2ZZZ,1329710QBZZZ,【般】モメタゾン点鼻液５０μｇ１１２噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「ＪＧ」５６噴霧用　５ｍｇ１０ｇ,1329710Q1051,1329710Q1ZZZ,1329710QAZZZ,【般】モメタゾン点鼻液５０μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「ＪＧ」１１２噴霧用　９ｍｇ１８ｇ,1329710Q2058,1329710Q2ZZZ,1329710QBZZZ,【般】モメタゾン点鼻液５０μｇ１１２噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「ニットー」５６噴霧用　５ｍｇ１０ｇ,1329710Q1086,1329710Q1ZZZ,1329710QAZZZ,【般】モメタゾン点鼻液５０μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モメタゾン点鼻液５０μｇ「ニットー」１１２噴霧用　９ｍｇ１８ｇ,1329710Q2082,1329710Q2ZZZ,1329710QBZZZ,【般】モメタゾン点鼻液５０μｇ１１２噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェン（２０ｍｇ）７ｃｍ×１０ｃｍ貼付剤,2649729S2010,2649729S2ZZZ,2649729SAZZZ,【般】ケトプロフェンテープ２０ｍｇ（７×１０ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェン（４０ｍｇ）１０ｃｍ×１４ｃｍ貼付剤,2649729S3017,2649729S3ZZZ,2649729SCZZZ,【般】ケトプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,バルプロ酸ナトリウム２００ｍｇ徐放錠,1139004G2012,1139004G2ZZZ,1139004GAZZZ,【般】バルプロ酸Ｎａ徐放錠２００ｍｇ,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,チモロールＸＥ点眼液０．２５％「センジュ」,1319702Q3088,1319702Q3ZZZ,1319702QAZZZ,【般】チモロール点眼液０．２５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,チモロールＸＥ点眼液０．５％「センジュ」,1319702Q4084,1319702Q4ZZZ,1319702QBZZZ,【般】チモロール点眼液０．５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フルチカゾンフランカルボン酸エステル２７．５タカタ５６　３ｍｇ,1329711Q3032,1329711Q3ZZZ,1329711QAZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フルチカゾンフランカルボン酸エステル２７．５タカタ１２０　５ｍｇ,1329711Q4039,1329711Q4ZZZ,1329711QBZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ１２０噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フルチカゾンフランカルボン酸エステル２７．５杏林５６　３ｍｇ６ｇ,1329711Q3024,1329711Q3ZZZ,1329711QAZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フルチカゾンフランカルボン酸エステル２７．５杏林１２０　５ｍｇ,1329711Q4020,1329711Q4ZZZ,1329711QBZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ１２０噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フルチカゾンフランカルボン酸エステル２７．５トーワ５６　３ｍｇ,1329711Q3040,1329711Q3ZZZ,1329711QAZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フルチカゾンフランカルボン酸エステル２７．５トーワ１２０　５ｍｇ,1329711Q4047,1329711Q4ZZZ,1329711QBZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ１２０噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フルチカゾンフランカルボン酸エステル２７．５武田テバ５６　３ｍｇ,1329711Q1030,1329711Q1ZZZ,1329711QAZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フルチカゾンフランカルボン酸エステル２７．５武田テバ１２０,1329711Q2036,1329711Q2ZZZ,1329711QBZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ１２０噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フルチカゾンフランカルボン酸エステル２７．５ニットー５６　３ｍｇ,1329711Q3059,1329711Q3ZZZ,1329711QAZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,フルチカゾンフランカルボン酸エステル２７．５ニットー１２０,1329711Q4055,1329711Q4ZZZ,1329711QBZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ１２０噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ケトプロフェンテープＳ２０ｍｇ「テイコク」　７ｃｍ×１０ｃｍ,2649729S2010,2649729S2ZZZ,2649729SAZZZ,【般】ケトプロフェンテープ２０ｍｇ（７×１０ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ヘパリン類似物質ローション０．３％「ＮＩＴ」,3339950Q1015,3339950Q1ZZZ,3339950QAZZZ,【般】ヘパリン類似物質外用液０．３％（乳剤性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ＭＳ温シップ「タイホウ」,2649843S1039,2649843S1ZZZ,2649831SAZZZ,【般】サリチル酸メチル等配合パップ１０ｇ（温感）,unmatched,True
+non_exact_generic_relation,ＭＳ温シップ「タカミツ」,2649843S1055,2649843S1ZZZ,2649831SAZZZ,【般】サリチル酸メチル等配合パップ１０ｇ（温感）,unmatched,True
+non_exact_generic_relation,ネオ消アル「ニッコー」,2619820Q1031,2619820Q1ZZZ,2619803XAZZZ,【般】消毒用アルコール配合外用液,unmatched,True
+non_exact_generic_relation,リズモンＴＧ点眼液０．２５％,1319702Q5021,1319702Q5ZZZ,1319702QAZZZ,【般】チモロール点眼液０．２５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,リズモンＴＧ点眼液０．５％,1319702Q6028,1319702Q6ZZZ,1319702QBZZZ,【般】チモロール点眼液０．５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,メタル消アル,2619805X1031,2619805X1ZZZ,2619803XAZZZ,【般】消毒用アルコール配合外用液,unmatched,True
+non_exact_generic_relation,ラクール温シップ,2649843S1071,2649843S1ZZZ,2649831SAZZZ,【般】サリチル酸メチル等配合パップ１０ｇ（温感）,unmatched,True
+non_exact_generic_relation,エチコール（ニワトリ印消毒用アルコール）,2619800X1020,2619800X1ZZZ,2619803XAZZZ,【般】消毒用アルコール配合外用液,unmatched,True
+non_exact_generic_relation,山善消アル,2619803X1024,2619803X1ZZZ,2619803XAZZZ,【般】消毒用アルコール配合外用液,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ネオ兼一消アルＡ,2619813X1028,2619813X1ZZZ,2619803XAZZZ,【般】消毒用アルコール配合外用液,unmatched,True
+non_exact_generic_relation,ネオ消アル（山善）,2619817X1026,2619817X1ZZZ,2619803XAZZZ,【般】消毒用アルコール配合外用液,unmatched,True
+non_exact_generic_relation,消毒用昭和アルコール,2619815X1027,2619815X1ZZZ,2619803XAZZZ,【般】消毒用アルコール配合外用液,unmatched,False
+non_exact_generic_relation,チモプトールＸＥ点眼液０．２５％（選）,1319702Q3037,1319702Q3ZZZ,1319702QAZZZ,【般】チモロール点眼液０．２５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,チモプトールＸＥ点眼液０．５％（選）,1319702Q4033,1319702Q4ZZZ,1319702QBZZZ,【般】チモロール点眼液０．５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,セルタッチパップ７０　１０ｃｍ×１４ｃｍ（選）,2649731S1143,2649731S1ZZZ,2649731SAZZZ,【般】フェルビナクパップ７０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,モーラステープＬ４０ｍｇ　１０ｃｍ×１４ｃｍ（選）,2649729S3084,2649729S3ZZZ,2649729SCZZZ,【般】ケトプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,モーラステープ２０ｍｇ　７ｃｍ×１０ｃｍ（選）,2649729S2169,2649729S2ZZZ,2649729SAZZZ,【般】ケトプロフェンテープ２０ｍｇ（７×１０ｃｍ非温感）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ゼポラステープ４０ｍｇ　１０ｃｍ×１４ｃｍ（選）,2649732S2047,2649732S2ZZZ,2649732SBZZZ,【般】フルルビプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,ナゾネックス点鼻液５０μｇ５６噴霧用　５ｍｇ１０ｇ（選）,1329710Q1027,1329710Q1ZZZ,1329710QAZZZ,【般】モメタゾン点鼻液５０μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ヒルドイドローション０．３％（選）,3339950Q1074,3339950Q1ZZZ,3339950QAZZZ,【般】ヘパリン類似物質外用液０．３％（乳剤性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,リズモンＴＧ点眼液０．２５％（選）,1319702Q5021,1319702Q5ZZZ,1319702QAZZZ,【般】チモロール点眼液０．２５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,リズモンＴＧ点眼液０．５％（選）,1319702Q6028,1319702Q6ZZZ,1319702QBZZZ,【般】チモロール点眼液０．５％（持続性）,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ヤクバンテープ４０ｍｇ　１０ｃｍ×１４ｃｍ（選）,2649732S2055,2649732S2ZZZ,2649732SBZZZ,【般】フルルビプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,アラミスト点鼻液２７．５μｇ５６噴霧用　３ｍｇ６ｇ（選）,1329711Q1021,1329711Q1ZZZ,1329711QAZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ５６噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,ナゾネックス点鼻液５０μｇ１１２噴霧用　９ｍｇ１８ｇ（選）,1329710Q2023,1329710Q2ZZZ,1329710QBZZZ,【般】モメタゾン点鼻液５０μｇ１１２噴霧用,prefix8_aggregate_or_exception,True
+non_exact_generic_relation,セルタッチテープ７０　１０ｃｍ×１４ｃｍ（選）,2649731S1232,2649731S1ZZZ,2649731SBZZZ,【般】フェルビナクテープ７０ｍｇ（１０×１４ｃｍ非温感）,prefix8_aggregate_or_exception,False
+non_exact_generic_relation,アラミスト点鼻液２７．５μｇ１２０噴霧用　５ｍｇ１０ｇ（選）,1329711Q2028,1329711Q2ZZZ,1329711QBZZZ,【般】フルチカゾンフランカルボン酸点鼻液２７．５μｇ１２０噴霧用,prefix8_aggregate_or_exception,True
+generic_master_only_no_y_r07_product,,,,1139014C1ZZZ,【般】ペランパネル細粒１％ハンサイリュウ,master_only,
+generic_master_only_no_y_r07_product,,,,1139014F1ZZZ,【般】ペランパネル錠２ｍｇハンジョウ,master_only,
+generic_master_only_no_y_r07_product,,,,1139014F2ZZZ,【般】ペランパネル錠４ｍｇパンジョウ,master_only,
+generic_master_only_no_y_r07_product,,,,1139014F3ZZZ,【般】ペランパネル口腔内崩壊錠２ｍｇ,master_only,
+generic_master_only_no_y_r07_product,,,,1139014F4ZZZ,【般】ペランパネル口腔内崩壊錠４ｍｇ,master_only,
+generic_master_only_no_y_r07_product,,,,1329707Q2ZZZ,【般】フルチカゾンプロピオン酸エステル点鼻液２５μｇ５６噴霧用,master_only,
+generic_master_only_no_y_r07_product,,,,2482011F2ZZZ,【般】ドロスピレノン・エチニルエストラジオール配合錠,master_only,
+generic_master_only_no_y_r07_product,,,,2590015G1ZZZ,【般】フェソテロジンフマル酸塩徐放錠４ｍｇパンサンエンジョホウジョウ,master_only,
+generic_master_only_no_y_r07_product,,,,2590015G2ZZZ,【般】フェソテロジンフマル酸塩徐放錠８ｍｇパンサンエンジョホウジョウ,master_only,
+generic_master_only_no_y_r07_product,,,,2646722N1ZZZ,【般】クロベタゾン酪酸エステルクリーム０．０５％,master_only,
+generic_master_only_no_y_r07_product,,,,2646722Q1ZZZ,【般】クロベタゾン酪酸エステル外用液０．０５％ガイヨウエキ,master_only,
+generic_master_only_no_y_r07_product,,,,3399009F4ZZZ,【般】プラスグレル錠２０ｍｇ,master_only,
+generic_master_only_no_y_r07_product,,,,3943001F2ZZZ,【般】アロプリノール錠５０ｍｇ,master_only,
+generic_master_only_no_y_r07_product,,,,3969019F3ZZZ,【般】ダパグリフロジン口腔内崩壊錠５ｍｇ,master_only,
+generic_master_only_no_y_r07_product,,,,3969019F4ZZZ,【般】ダパグリフロジン口腔内崩壊錠１０ｍｇ,master_only,
+generic_master_only_no_y_r07_product,,,,3999028F1ZZZ,【般】エルトロンボパグ錠１２．５ｍｇパンジョウ,master_only,
+generic_master_only_no_y_r07_product,,,,3999028F2ZZZ,【般】エルトロンボパグ錠２５ｍｇ,master_only,
+generic_master_only_no_y_r07_product,,,,3999029M1ZZZ,【般】フィンゴリモドカプセル０．５ｍｇパン,master_only,
+generic_master_only_no_y_r07_product,,,,3999035A1ZZZ,【般】ベタイン原末,master_only,
+generic_master_only_no_y_r07_product,,,,4299003M1ZZZ,【般】アナグレリドカプセル０．５ｍｇパン,master_only,
+generic_master_only_no_y_r07_product,,,,4419008F1ZZZ,【般】クレマスチン錠１ｍｇ,master_only,
+generic_master_only_no_y_r07_product,,,,4490032F1ZZZ,【般】デスロラタジン錠５ｍｇパンジョウ,master_only,
+generic_master_only_no_y_r07_product,,,,4490032F2ZZZ,【般】デスロラタジン口腔内崩壊錠５ｍｇ,master_only,
+generic_master_only_no_y_r07_product,,,,4490033F1ZZZ,【般】ビラスチン錠２０ｍｇパンジョウ,master_only,
+generic_master_only_no_y_r07_product,,,,4490033F2ZZZ,【般】ビラスチン口腔内崩壊錠２０ｍｇパンコウクウナイホウカイジョウ,master_only,
+y_r07_generic_not_in_ippan_master,ベンザリン細粒１％,1124003C1092,1124003C1ZZZ,1124003C1ZZZ,【般】ニトラゼパム細粒１％,y_r07_only,
+y_r07_generic_not_in_ippan_master,レンドルミン錠０．２５ｍｇ,1124009F1223,1124009F1ZZZ,1124009F1ZZZ,【般】ブロチゾラム錠０．２５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,レンドルミンＤ錠０．２５ｍｇ,1124009F2025,1124009F2ZZZ,1124009F2ZZZ,【般】ブロチゾラム口腔内崩壊錠０．２５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,レキソタン錠２　２ｍｇ,1124020F2030,1124020F2ZZZ,1124020F2ZZZ,【般】ブロマゼパム錠２ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,レキソタン錠５　５ｍｇ,1124020F4032,1124020F4ZZZ,1124020F4ZZZ,【般】ブロマゼパム錠５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ワイパックス錠０．５　０．５ｍｇ,1124022F1067,1124022F1ZZZ,1124022F1ZZZ,【般】ロラゼパム錠０．５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ワイパックス錠１．０　１ｍｇ,1124022F2071,1124022F2ZZZ,1124022F2ZZZ,【般】ロラゼパム錠１ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,コンスタン０．４ｍｇ錠,1124023F1029,1124023F1ZZZ,1124023F1ZZZ,【般】アルプラゾラム錠０．４ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,メイラックス錠１ｍｇ,1124029F1026,1124029F1ZZZ,1124029F1ZZZ,【般】ロフラゼプ酸エチル錠１ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,カルバマゼピン錠２００ｍｇ「アメル」,1139002F1070,1139002F1ZZZ,1139002F1ZZZ,【般】カルバマゼピン錠２００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,カルバマゼピン錠１００ｍｇ「アメル」,1139002F2018,1139002F2ZZZ,1139002F2ZZZ,【般】カルバマゼピン錠１００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,バルプロ酸ナトリウム細粒２０％「ＥＭＥＣ」,1139004C1049,1139004C1ZZZ,1139004C1ZZZ,【般】バルプロ酸Ｎａ細粒２０％,y_r07_only,
+y_r07_generic_not_in_ippan_master,セレニカＲ顆粒４０％,1139004D1052,1139004D1ZZZ,1139004D1ZZZ,【般】バルプロ酸Ｎａ徐放顆粒４０％,y_r07_only,
+y_r07_generic_not_in_ippan_master,デパケンＲ錠２００ｍｇ,1139004G2063,1139004G2ZZZ,1139004GAZZZ,【般】バルプロ酸Ｎａ徐放錠２００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,デパケンシロップ５％,1139004Q1100,1139004Q1ZZZ,1139004Q1ZZZ,【般】バルプロ酸Ｎａシロップ５％,y_r07_only,
+y_r07_generic_not_in_ippan_master,ラミクタール錠小児用５ｍｇ,1139009F2028,1139009F2ZZZ,1139009F2ZZZ,【般】ラモトリギン錠５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ジクロフェナクＮａ坐剤１２．５ｍｇ「日新」,1147700J1014,1147700J1ZZZ,1147700J1ZZZ,【般】ジクロフェナクＮａ坐剤１２．５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ジクロフェナクナトリウム坐剤２５ｍｇ「ゼリア」,1147700J2010,1147700J2ZZZ,1147700J2ZZZ,【般】ジクロフェナクＮａ坐剤２５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ジクロフェナクナトリウム坐剤５０ｍｇ「ゼリア」,1147700J3017,1147700J3ZZZ,1147700J3ZZZ,【般】ジクロフェナクＮａ坐剤５０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ブルフェン顆粒２０％,1149001D1160,1149001D1ZZZ,1149001D1ZZZ,【般】イブプロフェン顆粒２０％,y_r07_only,
+y_r07_generic_not_in_ippan_master,オークル錠１００ｍｇ,1149031F1030,1149031F1ZZZ,1149031F1ZZZ,【般】アクタリット錠１００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,オステラック錠２００　２００ｍｇ,1149032F2031,1149032F2ZZZ,1149032F2ZZZ,【般】エトドラク錠２００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ロルカム錠２ｍｇ,1149036F1025,1149036F1ZZZ,1149036F1ZZZ,【般】ロルノキシカム錠２ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ロルカム錠４ｍｇ,1149036F2021,1149036F2ZZZ,1149036F2ZZZ,【般】ロルノキシカム錠４ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,アマンタジン塩酸塩１００ｍｇ錠,1161001F2014,1161001F2ZZZ,1161001F2ZZZ,【般】アマンタジン塩酸塩錠１００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,リーゼ錠５ｍｇ,1179012F1118,1179012F1ZZZ,1179012F1ZZZ,【般】クロチアゼパム錠５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,リーゼ錠１０ｍｇ,1179012F2033,1179012F2ZZZ,1179012F2ZZZ,【般】クロチアゼパム錠１０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ドグマチール錠１００ｍｇ,1179016F1124,1179016F1ZZZ,1179016F1ZZZ,【般】スルピリド錠１００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ドグマチール錠２００ｍｇ,1179016F2090,1179016F2ZZZ,1179016F2ZZZ,【般】スルピリド錠２００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,リーマス錠２００　２００ｍｇ,1179017F2052,1179017F2ZZZ,1179017F2ZZZ,【般】炭酸リチウム錠２００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,エチゾラム錠０．５ｍｇ「ＥＭＥＣ」,1179025F1018,1179025F1ZZZ,1179025F1ZZZ,【般】エチゾラム錠０．５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,デパス錠０．２５ｍｇ,1179025F3029,1179025F3ZZZ,1179025F3ZZZ,【般】エチゾラム錠０．２５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,トロペロン細粒１％,1179026C1040,1179026C1ZZZ,1179026C1ZZZ,【般】チミペロン細粒１％,y_r07_only,
+y_r07_generic_not_in_ippan_master,トロペロン錠１ｍｇ,1179026F2027,1179026F2ZZZ,1179026F2ZZZ,【般】チミペロン錠１ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,トロペロン錠３ｍｇ,1179026F3023,1179026F3ZZZ,1179026F3ZZZ,【般】チミペロン錠３ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,レスリン錠２５　２５ｍｇ,1179037F1029,1179037F1ZZZ,1179037F1ZZZ,【般】トラゾドン塩酸塩錠２５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,リスパダール錠１ｍｇ,1179038F1023,1179038F1ZZZ,1179038F1ZZZ,【般】リスペリドン錠１ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,リスパダールＯＤ錠１ｍｇ,1179038F5029,1179038F5ZZZ,1179038F5ZZZ,【般】リスペリドン口腔内崩壊錠１ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ペンレステープ１８ｍｇ　３０．５ｍｍ×５０．０ｍｍ,1214701S1051,1214701S1ZZZ,1214701S1ZZZ,【般】リドカインテープ１８ｍｇ（３０．５×５０．０ｍｍ）,y_r07_only,
+y_r07_generic_not_in_ippan_master,リンラキサー錠１２５ｍｇ,1225001F1114,1225001F1ZZZ,1225001F1ZZZ,【般】クロルフェネシンカルバミン酸エステル錠１２５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,リンラキサー錠２５０ｍｇ,1225001F2250,1225001F2ZZZ,1225001F2ZZZ,【般】クロルフェネシンカルバミン酸エステル錠２５０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ジフェニドール塩酸塩錠２５ｍｇ「ＣＨ」,1339002F1411,1339002F1ZZZ,1339002F1ZZZ,【般】ジフェニドール塩酸塩錠２５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,メリスロン錠６ｍｇ,1339005F1296,1339005F1ZZZ,1339005F1ZZZ,【般】ベタヒスチンメシル酸塩錠６ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,メリスロン錠１２ｍｇ,1339005F2128,1339005F2ZZZ,1339005F2ZZZ,【般】ベタヒスチンメシル酸塩錠１２ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,アンカロン錠１００　１００ｍｇ,2129010F1022,2129010F1ZZZ,2129010F1ZZZ,【般】アミオダロン塩酸塩錠１００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,アルダクトンＡ錠５０ｍｇ,2133001F2057,2133001F2ZZZ,2133001F2ZZZ,【般】スピロノラクトン錠５０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,バイカロン錠２５ｍｇ,2135001F1128,2135001F1ZZZ,2135001F1ZZZ,【般】メフルシド錠２５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,イソソルビド内用液７０％「ＣＥＯ」,2139001S1010,2139001S1ZZZ,2139001S1ZZZ,【般】イソソルビド経口液７０％１ｍＬ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ダイアート錠３０ｍｇ,2139008F2028,2139008F2ZZZ,2139008F2ZZZ,【般】アゾセミド錠３０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,レニベース錠２．５　２．５ｍｇ,2144002F1024,2144002F1ZZZ,2144002F1ZZZ,【般】エナラプリルマレイン酸塩錠２．５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,レニベース錠５　５ｍｇ,2144002F2020,2144002F2ZZZ,2144002F2ZZZ,【般】エナラプリルマレイン酸塩錠５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,レニベース錠１０　１０ｍｇ,2144002F3027,2144002F3ZZZ,2144002F3ZZZ,【般】エナラプリルマレイン酸塩錠１０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,オドリック錠０．５ｍｇ,2144011F1023,2144011F1ZZZ,2144011F1ZZZ,【般】トランドラプリル錠０．５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,オドリック錠１ｍｇ,2144011F2020,2144011F2ZZZ,2144011F2ZZZ,【般】トランドラプリル錠１ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,トランデート錠５０ｍｇ,2149009F1030,2149009F1ZZZ,2149009F1ZZZ,【般】ラベタロール塩酸塩錠５０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,セロケン錠２０ｍｇ,2149010F1025,2149010F1ZZZ,2149010F1ZZZ,【般】メトプロロール酒石酸塩錠２０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ロプレソール錠４０ｍｇ,2149010F2072,2149010F2ZZZ,2149010F2ZZZ,【般】メトプロロール酒石酸塩錠４０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ペルジピン錠２０ｍｇ,2149019F2170,2149019F2ZZZ,2149019F2ZZZ,【般】ニカルジピン塩酸塩錠２０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ニバジール錠２ｍｇ,2149022F1028,2149022F1ZZZ,2149022F1ZZZ,【般】ニルバジピン錠２ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,アーチスト錠２．５ｍｇ,2149032F4020,2149032F4ZZZ,2149032F4ZZZ,【般】カルベジロール錠２．５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,スプレンジール錠２．５ｍｇ,2149035F1025,2149035F1ZZZ,2149035F1ZZZ,【般】フェロジピン錠２．５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ディオバン錠２０ｍｇ,2149041F1020,2149041F1ZZZ,2149041F1ZZZ,【般】バルサルタン錠２０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ディオバンＯＤ錠２０ｍｇ,2149041F5026,2149041F5ZZZ,2149041F5ZZZ,【般】バルサルタン口腔内崩壊錠２０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,カルブロック錠８ｍｇ,2149043F1020,2149043F1ZZZ,2149043F1ZZZ,【般】アゼルニジピン錠８ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,オルメサルタン錠５ｍｇ「ＹＤ」,2149044F3019,2149044F3ZZZ,2149044F3ZZZ,【般】オルメサルタン錠５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,オルメテックＯＤ錠５ｍｇ,2149044F8029,2149044F8ZZZ,2149044F8ZZZ,【般】オルメサルタン口腔内崩壊錠５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,コメリアンコーワ錠５０　５０ｍｇ,2171005F1068,2171005F1ZZZ,2171005F1ZZZ,【般】ジラゼプ塩酸塩錠５０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ヘルベッサー錠３０　３０ｍｇ,2171006F1224,2171006F1ZZZ,2171006F1ZZZ,【般】ジルチアゼム塩酸塩錠３０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ペルサンチン錠１００ｍｇ,2171010F3053,2171010F3ZZZ,2171010F3ZZZ,【般】ジピリダモール錠１００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ニフェジピンＬ錠１０ｍｇ「サワイ」,2171014G1011,2171014G1ZZZ,2171014G1ZZZ,【般】ニフェジピン徐放錠１０ｍｇ（１２時間持続）,y_r07_only,
+y_r07_generic_not_in_ippan_master,ニフェジピンＬ錠２０ｍｇ「サワイ」,2171014G2018,2171014G2ZZZ,2171014G2ZZZ,【般】ニフェジピン徐放錠２０ｍｇ（１２時間持続）,y_r07_only,
+y_r07_generic_not_in_ippan_master,アダラートＣＲ錠１０ｍｇ,2171014G3022,2171014G3ZZZ,2171014G3ZZZ,【般】ニフェジピン徐放錠１０ｍｇ（２４時間持続）,y_r07_only,
+y_r07_generic_not_in_ippan_master,アダラートＣＲ錠２０ｍｇ,2171014G4029,2171014G4ZZZ,2171014G4ZZZ,【般】ニフェジピン徐放錠２０ｍｇ（２４時間持続）,y_r07_only,
+y_r07_generic_not_in_ippan_master,アダラートＣＲ錠４０ｍｇ,2171014G5025,2171014G5ZZZ,2171014G5ZZZ,【般】ニフェジピン徐放錠４０ｍｇ（２４時間持続）,y_r07_only,
+y_r07_generic_not_in_ippan_master,セパミット－Ｒカプセル１０　１０ｍｇ,2171014N1029,2171014N1ZZZ,2171014N1ZZZ,【般】ニフェジピン徐放カプセル１０ｍｇ（１２時間持続）,y_r07_only,
+y_r07_generic_not_in_ippan_master,セパミット－Ｒカプセル２０　２０ｍｇ,2171014N2025,2171014N2ZZZ,2171014N2ZZZ,【般】ニフェジピン徐放カプセル２０ｍｇ（１２時間持続）,y_r07_only,
+y_r07_generic_not_in_ippan_master,シグマート錠２．５ｍｇ,2171017F1028,2171017F1ZZZ,2171017F1ZZZ,【般】ニコランジル錠２．５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,シグマート錠５ｍｇ,2171017F2024,2171017F2ZZZ,2171017F2ZZZ,【般】ニコランジル錠５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ニトレンジピン５ｍｇ錠,2171020F1011,2171020F1ZZZ,2171020F1ZZZ,【般】ニトレンジピン錠５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ニトレンジピン１０ｍｇ錠,2171020F2018,2171020F2ZZZ,2171020F2ZZZ,【般】ニトレンジピン錠１０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,コニール錠２　２ｍｇ,2171021F1024,2171021F1ZZZ,2171021F1ZZZ,【般】ベニジピン塩酸塩錠２ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ノルバスク錠２．５ｍｇ,2171022F1029,2171022F1ZZZ,2171022F1ZZZ,【般】アムロジピン錠２．５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ノルバスク錠５ｍｇ,2171022F2025,2171022F2ZZZ,2171022F2ZZZ,【般】アムロジピン錠５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,アムロジンＯＤ錠２．５ｍｇ,2171022F3021,2171022F3ZZZ,2171022F3ZZZ,【般】アムロジピン口腔内崩壊錠２．５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,アムロジンＯＤ錠５ｍｇ,2171022F4028,2171022F4ZZZ,2171022F4ZZZ,【般】アムロジピン口腔内崩壊錠５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,アイトロール錠２０ｍｇ,2171023F2020,2171023F2ZZZ,2171023F2ZZZ,【般】一硝酸イソソルビド錠２０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ベザトールＳＲ錠２００ｍｇ,2183005G1234,2183005G1ZZZ,2183005G1ZZZ,【般】ベザフィブラート徐放錠２００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ベザトールＳＲ錠１００ｍｇ,2183005G2028,2183005G2ZZZ,2183005G2ZZZ,【般】ベザフィブラート徐放錠１００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ＥＰＬカプセル２５０ｍｇ,2189006M1058,2189006M1ZZZ,2189006M1ZZZ,【般】ポリエンホスファチジルコリンカプセル２５０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ロレルコ錠２５０ｍｇ,2189008F1287,2189008F1ZZZ,2189008F1ZZZ,【般】プロブコール錠２５０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,メバロチン錠５　５ｍｇ,2189010F1039,2189010F1ZZZ,2189010F1ZZZ,【般】プラバスタチンＮａ錠５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,セロクラール錠１０ｍｇ,2190005F1225,2190005F1ZZZ,2190005F1ZZZ,【般】イフェンプロジル酒石酸塩錠１０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,セロクラール錠２０ｍｇ,2190005F2051,2190005F2ZZZ,2190005F2ZZZ,【般】イフェンプロジル酒石酸塩錠２０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ケイキサレート散,2190009A1048,2190009A1ZZZ,2190009A1ZZZ,【般】ポリスチレンスルホン酸Ｎａ原末,y_r07_only,
+y_r07_generic_not_in_ippan_master,ポリスチレンスルホン酸Ｃａ経口ゼリー２０％分包２５ｇ「三和」,2190016Q2034,2190016Q2ZZZ,2190016Q2ZZZ,【般】ポリスチレンスルホン酸Ｃａ経口ゼリー２０％２５ｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,デキストロメトルファン臭化水素酸塩細粒１０％「ツルハラ」,2223001C1045,2223001C1ZZZ,2223001C1ZZZ,【般】デキストロメトルファン臭化水素酸塩細粒１０％,y_r07_only,
+y_r07_generic_not_in_ippan_master,カルボシステインＤＳ５０％「タカタ」,2233002R2010,2233002R2ZZZ,2233002R2ZZZ,【般】カルボシステインシロップ用５０％,y_r07_only,
+y_r07_generic_not_in_ippan_master,ブロムヘキシン塩酸塩シロップ０．０８％「トーワ」,2234001Q1135,2234001Q1ZZZ,2234001Q1ZZZ,【般】ブロムヘキシン塩酸塩シロップ０．０８％,y_r07_only,
+y_r07_generic_not_in_ippan_master,テオドール錠１００ｍｇ,2251001F2115,2251001F2ZZZ,2251001F2ZZZ,【般】テオフィリン徐放錠１００ｍｇ（１２～２４時間持続）,y_r07_only,
+y_r07_generic_not_in_ippan_master,スピロペント錠１０μｇ,2259006F1080,2259006F1ZZZ,2259006F1ZZZ,【般】クレンブテロール塩酸塩錠１０μｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ビオヂアスミンＦ－２散,2316012A1124,2316012A1ZZZ,2316012AAZZZ,【般】ラクトミン原末,y_r07_only,
+y_r07_generic_not_in_ippan_master,ファモチジン錠１０「サワイ」　１０ｍｇ,2325003F1016,2325003F1ZZZ,2325003F1ZZZ,【般】ファモチジン錠１０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ファモチジン錠２０「サワイ」　２０ｍｇ,2325003F2012,2325003F2ZZZ,2325003F2ZZZ,【般】ファモチジン錠２０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ガスターＤ錠１０ｍｇ,2325003F3035,2325003F3ZZZ,2325003F3ZZZ,【般】ファモチジン口腔内崩壊錠１０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ガスターＤ錠２０ｍｇ,2325003F4031,2325003F4ZZZ,2325003F4ZZZ,【般】ファモチジン口腔内崩壊錠２０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,アルタットカプセル７５ｍｇ,2325004M1087,2325004M1ZZZ,2325004M1ZZZ,【般】ロキサチジン酢酸エステル塩酸塩徐放カプセル７５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,アルサルミン細粒９０％,2329008C1097,2329008C1ZZZ,2329008C1ZZZ,【般】スクラルファート細粒９０％,y_r07_only,
+y_r07_generic_not_in_ippan_master,ドグマチール細粒１０％,2329009C2055,2329009C2ZZZ,2329009C2ZZZ,【般】スルピリド細粒１０％,y_r07_only,
+y_r07_generic_not_in_ippan_master,スルピリド細粒５０％「アメル」,2329009C3019,2329009C3ZZZ,2329009C3ZZZ,【般】スルピリド細粒５０％,y_r07_only,
+y_r07_generic_not_in_ippan_master,ソファルコン錠５０ｍｇ「ＴＣＫ」,2329011F1079,2329011F1ZZZ,2329011F1ZZZ,【般】ソファルコン錠５０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ソファルコンカプセル１００ｍｇ「ＴＣＫ」,2329011M2090,2329011M2ZZZ,2329011M2ZZZ,【般】ソファルコンカプセル１００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,セルベックスカプセル５０ｍｇ,2329012M1021,2329012M1ZZZ,2329012M1ZZZ,【般】テプレノンカプセル５０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,トロキシピド錠１００ｍｇ「オーハラ」,2329015F2146,2329015F2ZZZ,2329015F2ZZZ,【般】トロキシピド錠１００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ガスロンＮ錠４ｍｇ,2329020F2023,2329020F2ZZZ,2329020F2ZZZ,【般】イルソグラジンマレイン酸塩錠４ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ガスロンＮ・ＯＤ錠４ｍｇ,2329020F4026,2329020F4ZZZ,2329020F4ZZZ,【般】イルソグラジンマレイン酸塩口腔内崩壊錠４ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,プロマック顆粒１５％,2329027D1028,2329027D1ZZZ,2329027D1ZZZ,【般】ポラプレジンク顆粒１５％,y_r07_only,
+y_r07_generic_not_in_ippan_master,プロマックＤ錠７５　７５ｍｇ,2329027F1029,2329027F1ZZZ,2329027F1ZZZ,【般】ポラプレジンク口腔内崩壊錠７５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,重散,2339105X1022,2339105X1ZZZ,2339105X1ZZZ,【般】炭酸水素ナトリウム・ゲンチアナ・ジアスターゼ配合散,y_r07_only,
+y_r07_generic_not_in_ippan_master,ビーマス配合錠,2359108F1066,2359108F1ZZZ,2359108F1ZZZ,【般】ジオクチルソジウムスルホサクシネート等配合錠,y_r07_only,
+y_r07_generic_not_in_ippan_master,ウルソ錠５０ｍｇ,2362001F1088,2362001F1ZZZ,2362001F1ZZZ,【般】ウルソデオキシコール酸錠５０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ウルソ錠１００ｍｇ,2362001F2149,2362001F2ZZZ,2362001F2ZZZ,【般】ウルソデオキシコール酸錠１００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,メサラジン注腸１ｇ「ＪＧ」,2399715X1031,2399715X1ZZZ,2399715X1ZZZ,【般】メサラジン注腸剤１ｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,デスモプレシン点鼻スプレー０．０１％「ＩＬＳ」　５００μｇ,2419700R2037,2419700R2ZZZ,2419700R2ZZZ,【般】デスモプレシン点鼻スプレー０．０１％,y_r07_only,
+y_r07_generic_not_in_ippan_master,ベタメタゾン錠０．５ｍｇ「サワイ」,2454004F2081,2454004F2ZZZ,2454004F2ZZZ,【般】ベタメタゾン錠０．５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,プレドネマ注腸２０ｍｇ,2456700X1025,2456700X1ZZZ,2456700X1ZZZ,【般】プレドニゾロンリン酸エステルＮａ注腸剤２０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,プロクトセディル軟膏,2559806M1021,2559806M1ZZZ,2559806M1ZZZ,【般】ヒドロコルチゾン・フラジオマイシン等配合軟膏,y_r07_only,
+y_r07_generic_not_in_ippan_master,ネリザ軟膏,2559814M1042,2559814M1ZZZ,2559814M1ZZZ,【般】ジフルコルトロン・リドカイン配合軟膏,y_r07_only,
+y_r07_generic_not_in_ippan_master,タムスロシン塩酸塩カプセル０．１ｍｇ「ＮＩＧ」,2590008N1233,2590008N1ZZZ,2590008N1ZZZ,【般】タムスロシン塩酸塩カプセル０．１ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,タムスロシン塩酸塩カプセル０．２ｍｇ「ＮＩＧ」,2590008N2230,2590008N2ZZZ,2590008N2ZZZ,【般】タムスロシン塩酸塩カプセル０．２ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,消毒用エタノール液ＩＰ,2615705Q1048,2615705Q1ZZZ,2615705Q1ZZZ,【般】エタノール外用液,y_r07_only,
+y_r07_generic_not_in_ippan_master,デルモゾールＤＰクリーム０．０６４％,2646703N1111,2646703N1ZZZ,2646703N1ZZZ,【般】ベタメタゾンジプロピオン酸エステルクリーム０．０６４％,y_r07_only,
+y_r07_generic_not_in_ippan_master,デルモゾールＤＰローション０．０６４％,2646703Q2033,2646703Q2ZZZ,2646703Q2ZZZ,【般】ベタメタゾンジプロピオン酸エステル外用液０．０６４％,y_r07_only,
+y_r07_generic_not_in_ippan_master,トリアムシノロンアセトニドクリーム０．１％「ＴＫ」,2646705N1102,2646705N1ZZZ,2646705N1ZZZ,【般】トリアムシノロンアセトニドクリーム０．１％,y_r07_only,
+y_r07_generic_not_in_ippan_master,スピラゾン軟膏０．３％,2646720M1071,2646720M1ZZZ,2646720M1ZZZ,【般】プレドニゾロン吉草酸エステル酢酸エステル軟膏０．３％,y_r07_only,
+y_r07_generic_not_in_ippan_master,スピラゾンクリーム０．３％,2646720N1085,2646720N1ZZZ,2646720N1ZZZ,【般】プレドニゾロン吉草酸エステル酢酸エステルクリーム０．３％,y_r07_only,
+y_r07_generic_not_in_ippan_master,モーラスパップ３０ｍｇ　１０ｃｍ×１４ｃｍ,2649729S1154,2649729S1ZZZ,2649729S1ZZZ,【般】ケトプロフェンパップ３０ｍｇ（１０×１４ｃｍ非温感）,y_r07_only,
+y_r07_generic_not_in_ippan_master,セルタッチパップ１４０　２０ｃｍ×１４ｃｍ,2649731S3022,2649731S3ZZZ,2649731S3ZZZ,【般】フェルビナクパップ１４０ｍｇ（２０×１４ｃｍ非温感）,y_r07_only,
+y_r07_generic_not_in_ippan_master,セルタッチパップ７０　１０ｃｍ×１４ｃｍ,2649731S1143,2649731S1ZZZ,2649731SAZZZ,【般】フェルビナクパップ７０ｍｇ（１０×１４ｃｍ非温感）,y_r07_only,
+y_r07_generic_not_in_ippan_master,フェルビナクテープ７０ｍｇ「ＥＭＥＣ」　１０ｃｍ×１４ｃｍ,2649731S1178,2649731S1ZZZ,2649731SBZZZ,【般】フェルビナクテープ７０ｍｇ（１０×１４ｃｍ非温感）,y_r07_only,
+y_r07_generic_not_in_ippan_master,ゼポラステープ２０ｍｇ　７ｃｍ×１０ｃｍ,2649732S3043,2649732S3ZZZ,2649732S3ZZZ,【般】フルルビプロフェンテープ２０ｍｇ（７×１０ｃｍ非温感）,y_r07_only,
+y_r07_generic_not_in_ippan_master,ゼポラステープ４０ｍｇ　１０ｃｍ×１４ｃｍ,2649732S2047,2649732S2ZZZ,2649732SBZZZ,【般】フルルビプロフェンテープ４０ｍｇ（１０×１４ｃｍ非温感）,y_r07_only,
+y_r07_generic_not_in_ippan_master,ジクロフェナクナトリウムテープ１５ｍｇ「テイコク」　７×１０ｃｍ,2649734S1015,2649734S1ZZZ,2649734S1ZZZ,【般】ジクロフェナクＮａテープ１５ｍｇ（７×１０ｃｍ非温感）,y_r07_only,
+y_r07_generic_not_in_ippan_master,ナボールパップ７０ｍｇ　７ｃｍ×１０ｃｍ,2649734S3042,2649734S3ZZZ,2649734S3ZZZ,【般】ジクロフェナクＮａパップ７０ｍｇ（７×１０ｃｍ非温感）,y_r07_only,
+y_r07_generic_not_in_ippan_master,ロキソニンゲル１％,2649735Q1020,2649735Q1ZZZ,2649735Q1ZZZ,【般】ロキソプロフェンＮａゲル１％,y_r07_only,
+y_r07_generic_not_in_ippan_master,フェロミア錠５０ｍｇ　鉄５０ｍｇ,3222013F1025,3222013F1ZZZ,3222013F1ZZZ,【般】クエン酸第一鉄ナトリウム錠５０ｍｇ（鉄として）,y_r07_only,
+y_r07_generic_not_in_ippan_master,ワルファリンＫ細粒０．２％「ＮＳ」,3332001C1028,3332001C1ZZZ,3332001C1ZZZ,【般】ワルファリンＫ細粒０．２％,y_r07_only,
+y_r07_generic_not_in_ippan_master,ジャドニュ顆粒分包９０ｍｇ,3929008D1022,3929008D1ZZZ,3929008D1ZZZ,【般】デフェラシロクス顆粒９０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ウラリット－Ｕ配合散,3949101A1149,3949101A1ZZZ,3949101A1ZZZ,【般】クエン酸カリウム・クエン酸ナトリウム配合散,y_r07_only,
+y_r07_generic_not_in_ippan_master,ウラリット配合錠,3949101F1073,3949101F1ZZZ,3949101F1ZZZ,【般】クエン酸カリウム・クエン酸ナトリウム配合錠,y_r07_only,
+y_r07_generic_not_in_ippan_master,オイグルコン錠１．２５ｍｇ,3961003F1028,3961003F1ZZZ,3961003F1ZZZ,【般】グリベンクラミド錠１．２５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,グリミクロンＨＡ錠２０ｍｇ,3961007F2022,3961007F2ZZZ,3961007F2ZZZ,【般】グリクラジド錠２０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,セイブル錠２５ｍｇ,3969009F1023,3969009F1ZZZ,3969009F1ZZZ,【般】ミグリトール錠２５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,セイブルＯＤ錠２５ｍｇ,3969009F6025,3969009F6ZZZ,3969009F6ZZZ,【般】ミグリトール口腔内崩壊錠２５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,シクロスポリン細粒１７％「ＶＴＲＳ」,3999004C1058,3999004C1ZZZ,3999004C1ZZZ,【般】シクロスポリン細粒１７％,y_r07_only,
+y_r07_generic_not_in_ippan_master,ニポラジン錠３ｍｇ,4413004F1200,4413004F1ZZZ,4413004F1ZZZ,【般】メキタジン錠３ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,リザベンカプセル１００ｍｇ,4490002M1315,4490002M1ZZZ,4490002M1ZZZ,【般】トラニラストカプセル１００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,リザベンドライシロップ５％,4490002R1142,4490002R1ZZZ,4490002R1ZZZ,【般】トラニラストシロップ用５％,y_r07_only,
+y_r07_generic_not_in_ippan_master,アレギサール錠１０ｍｇ,4490011F1021,4490011F1ZZZ,4490011F1ZZZ,【般】ペミロラストＫ錠１０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,セチリジン塩酸塩ＯＤ錠５ｍｇ「サワイ」,4490020F3023,4490020F3ZZZ,4490020F3ZZZ,【般】セチリジン塩酸塩口腔内崩壊錠５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,セチリジン塩酸塩ＯＤ錠１０ｍｇ「サワイ」,4490020F4020,4490020F4ZZZ,4490020F4ZZZ,【般】セチリジン塩酸塩口腔内崩壊錠１０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,フェキソフェナジン塩酸塩ＯＤ錠３０ｍｇ「トーワ」,4490023F4031,4490023F4ZZZ,4490023F4ZZZ,【般】フェキソフェナジン塩酸塩口腔内崩壊錠３０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ザイザルシロップ０．０５％,4490028Q1028,4490028Q1ZZZ,4490028Q1ZZZ,【般】レボセチリジン塩酸塩シロップ０．０５％,y_r07_only,
+y_r07_generic_not_in_ippan_master,アモキシシリン細粒２０％「ＴＣＫ」　２００ｍｇ,6131001C2119,6131001C2ZZZ,6131001C2ZZZ,【般】アモキシシリン細粒２０％,y_r07_only,
+y_r07_generic_not_in_ippan_master,ミノサイクリン塩酸塩錠１００ｍｇ「サワイ」,6152005F2113,6152005F2ZZZ,6152005F2ZZZ,【般】ミノサイクリン塩酸塩錠１００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,ミノマイシンカプセル１００ｍｇ,6152005M2074,6152005M2ZZZ,6152005M2ZZZ,【般】ミノサイクリン塩酸塩カプセル１００ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,オゼックス錠７５　７５ｍｇ,6241010F1020,6241010F1ZZZ,6241010F1ZZZ,【般】トスフロキサシントシル酸塩錠７５ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,オゼックス錠１５０　１５０ｍｇ,6241010F2027,6241010F2ZZZ,6241010F2ZZZ,【般】トスフロキサシントシル酸塩錠１５０ｍｇ,y_r07_only,
+y_r07_generic_not_in_ippan_master,バルトレックス顆粒５０％,6250019D1020,6250019D1ZZZ,6250019D1ZZZ,【般】バラシクロビル顆粒５０％,y_r07_only,
+y_r07_generic_not_in_ippan_master,モルペス細粒２％,8114004C1025,8114004C1ZZZ,8114004C1ZZZ,【般】モルヒネ硫酸塩徐放細粒２％（１２時間持続）,y_r07_only,
+y_r07_generic_not_in_ippan_master,モルペス細粒６％,8114004C2021,8114004C2ZZZ,8114004C2ZZZ,【般】モルヒネ硫酸塩徐放細粒６％（１２時間持続）,y_r07_only,
+y_r07_generic_not_in_ippan_master,フェントステープ１ｍｇ,8219701S1025,8219701S1ZZZ,8219701S1ZZZ,【般】フェンタニルクエン酸塩テープ１ｍｇ（１日用）,y_r07_only,
+y_r07_generic_not_in_ippan_master,フェントステープ２ｍｇ,8219701S2021,8219701S2ZZZ,8219701S2ZZZ,【般】フェンタニルクエン酸塩テープ２ｍｇ（１日用）,y_r07_only,
+y_r07_generic_not_in_ippan_master,フェントステープ４ｍｇ,8219701S3028,8219701S3ZZZ,8219701S3ZZZ,【般】フェンタニルクエン酸塩テープ４ｍｇ（１日用）,y_r07_only,
+y_r07_generic_not_in_ippan_master,フェントステープ６ｍｇ,8219701S4024,8219701S4ZZZ,8219701S4ZZZ,【般】フェンタニルクエン酸塩テープ６ｍｇ（１日用）,y_r07_only,
+y_r07_generic_not_in_ippan_master,フェントステープ８ｍｇ,8219701S5020,8219701S5ZZZ,8219701S5ZZZ,【般】フェンタニルクエン酸塩テープ８ｍｇ（１日用）,y_r07_only,
+y_r07_generic_not_in_ippan_master,フェントステープ０．５ｍｇ,8219701S6027,8219701S6ZZZ,8219701S6ZZZ,【般】フェンタニルクエン酸塩テープ０．５ｍｇ（１日用）,y_r07_only,

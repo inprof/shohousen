@@ -28,16 +28,27 @@ final class PrescriptionCorrectionService
                 ];
             }
             foreach ($this->knowledge->findDrugCandidates($drugName) as $candidate) {
-                $name = (string)$candidate['drug_name'];
-                if ($name !== $drugName) {
+                $name = (string)($candidate['drug_name'] ?? '');
+                if ($name !== '' && $name !== $drugName) {
+                    $reason = (string)($candidate['reason'] ?? '');
+                    if ($reason === '') {
+                        $reason = '薬品マスタ/一般名・HOT9辞書に一致';
+                    }
+                    $meta = [];
+                    foreach (['yj_code','hot9_code','generic_code','generic_name','alias_name','alias_type','relation_confidence','brand_class'] as $key) {
+                        if (isset($candidate[$key]) && (string)$candidate[$key] !== '') {
+                            $meta[$key] = $candidate[$key];
+                        }
+                    }
                     $candidates[] = [
                         'field_path' => 'medications[' . $i . '].drug_name',
                         'field_type' => 'drug_name',
                         'original_value' => $drugName,
                         'candidate_value' => $name,
-                        'candidate_source' => 'drug_master',
-                        'score' => 95.0,
-                        'reason' => '薬品マスタ/別名に一致',
+                        'candidate_source' => (string)($candidate['candidate_source'] ?? 'drug_dictionary'),
+                        'score' => (float)($candidate['score'] ?? 92.0),
+                        'reason' => $reason,
+                        'dictionary_meta' => $meta,
                     ];
                 }
             }
@@ -89,7 +100,7 @@ final class PrescriptionCorrectionService
                         ':candidate_value' => (string)($candidate['candidate_value'] ?? ''),
                         ':candidate_source' => (string)($candidate['candidate_source'] ?? ''),
                         ':score' => (float)($candidate['score'] ?? 0),
-                        ':reason' => (string)($candidate['reason'] ?? ''),
+                        ':reason' => mb_substr((string)($candidate['reason'] ?? '') . (!empty($candidate['dictionary_meta']) ? ' / meta=' . json_encode($candidate['dictionary_meta'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : ''), 0, 1000),
                     ]);
                 }
             }

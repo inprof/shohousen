@@ -17,6 +17,7 @@ final class PrescriptionTemplateDetector
         $height = (int)($stored['height'] ?? 0);
         $mime = (string)($stored['mime_type'] ?? '');
         $features = $this->featuresFromDimensions($width, $height, $mime);
+        $orientation = (string)($features['orientation'] ?? 'unknown');
         $fingerprint = hash('sha256', json_encode($features, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
 
         return [

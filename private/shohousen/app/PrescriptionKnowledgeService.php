@@ -124,6 +124,11 @@ final class PrescriptionKnowledgeService
             return [];
         }
         $rows = [];
+        if (class_exists('DrugDictionaryService')) {
+            foreach (DrugDictionaryService::findCandidates($value, 8) as $candidate) {
+                $rows[] = $candidate;
+            }
+        }
         try {
             if (Db::tableExists(Db::knowledge(), 'drug_aliases') && Db::tableExists(Db::knowledge(), 'drug_master')) {
                 $stmt = Db::knowledge()->prepare('SELECT dm.drug_name, da.alias_name, da.alias_type, 100 AS score
@@ -133,6 +138,26 @@ final class PrescriptionKnowledgeService
                     LIMIT 5');
                 $stmt->execute([':value' => $value]);
                 $rows = array_merge($rows, $stmt->fetchAll());
+            }
+
+            if (Db::tableExists(Db::knowledge(), 'prescription_visual_text_learning_scores')) {
+                $sql = 'SELECT field_label, field_group, value_type, text_style, quality_bucket, blur_bucket, brightness_bucket, contrast_bucket, correction_rate, miss_rate, overdetect_rate, observed_count
+                    FROM prescription_visual_text_learning_scores
+                    WHERE company_uid = :company_uid
+                      AND branch_uid = :branch_uid
+                      AND observed_count >= 3';
+                $params = [':company_uid' => current_company_uid(), ':branch_uid' => current_branch_uid()];
+                if ($layoutFingerprint !== '' && Db::columnExists(Db::knowledge(), 'prescription_visual_text_learning_scores', 'layout_fingerprint')) {
+                    $sql .= ' AND (layout_fingerprint = :layout_fingerprint OR layout_fingerprint = "unknown")';
+                    $params[':layout_fingerprint'] = $layoutFingerprint;
+                }
+                $sql .= ' ORDER BY correction_rate DESC, miss_rate DESC, overdetect_rate DESC, observed_count DESC, last_seen_at DESC LIMIT 6';
+                $stmt = Db::knowledge()->prepare($sql);
+                $stmt->execute($params);
+                foreach ($stmt->fetchAll() as $row) {
+                    $label = (string)($row['field_label'] ?? '文字項目');
+                    $hints[] = '- 文字品質傾向: ' . $label . ' は ' . (string)($row['text_style'] ?? 'unknown') . ' / ' . (string)($row['quality_bucket'] ?? 'unknown') . ' / ぼけ=' . (string)($row['blur_bucket'] ?? 'unknown') . ' で修正率 ' . round((float)($row['correction_rate'] ?? 0), 1) . '%。手書き・小さい文字・にじみ・薄い印字の場合は候補として残し要確認にする。';
+                }
             }
 
             if (Db::tableExists(Db::knowledge(), 'drug_name_relation_preferences')) {
@@ -161,13 +186,17 @@ final class PrescriptionKnowledgeService
         $seen = [];
         $out = [];
         foreach ($rows as $row) {
-            $key = (string)($row['drug_name'] ?? '') . '|' . (string)($row['alias_name'] ?? '');
-            if ($key === '|' || isset($seen[$key])) {
+            $key = (string)($row['yj_code'] ?? '') . '|' . (string)($row['drug_name'] ?? '') . '|' . (string)($row['alias_name'] ?? '');
+            if ($key === '||' || isset($seen[$key])) {
                 continue;
             }
             $seen[$key] = true;
+            if (!isset($row['score'])) {
+                $row['score'] = 70;
+            }
             $out[] = $row;
         }
+        usort($out, static fn(array $a, array $b): int => ((float)($b['score'] ?? 0) <=> (float)($a['score'] ?? 0)));
         return array_slice($out, 0, 8);
     }
 
@@ -430,6 +459,26 @@ final class PrescriptionKnowledgeService
             }
 
             $prefStmt = null;
+            if (Db::tableExists(Db::knowledge(), 'prescription_visual_text_learning_scores')) {
+                $sql = 'SELECT field_label, field_group, value_type, text_style, quality_bucket, blur_bucket, brightness_bucket, contrast_bucket, correction_rate, miss_rate, overdetect_rate, observed_count
+                    FROM prescription_visual_text_learning_scores
+                    WHERE company_uid = :company_uid
+                      AND branch_uid = :branch_uid
+                      AND observed_count >= 3';
+                $params = [':company_uid' => current_company_uid(), ':branch_uid' => current_branch_uid()];
+                if ($layoutFingerprint !== '' && Db::columnExists(Db::knowledge(), 'prescription_visual_text_learning_scores', 'layout_fingerprint')) {
+                    $sql .= ' AND (layout_fingerprint = :layout_fingerprint OR layout_fingerprint = "unknown")';
+                    $params[':layout_fingerprint'] = $layoutFingerprint;
+                }
+                $sql .= ' ORDER BY correction_rate DESC, miss_rate DESC, overdetect_rate DESC, observed_count DESC, last_seen_at DESC LIMIT 6';
+                $stmt = Db::knowledge()->prepare($sql);
+                $stmt->execute($params);
+                foreach ($stmt->fetchAll() as $row) {
+                    $label = (string)($row['field_label'] ?? '文字項目');
+                    $hints[] = '- 文字品質傾向: ' . $label . ' は ' . (string)($row['text_style'] ?? 'unknown') . ' / ' . (string)($row['quality_bucket'] ?? 'unknown') . ' / ぼけ=' . (string)($row['blur_bucket'] ?? 'unknown') . ' で修正率 ' . round((float)($row['correction_rate'] ?? 0), 1) . '%。手書き・小さい文字・にじみ・薄い印字の場合は候補として残し要確認にする。';
+                }
+            }
+
             if (Db::tableExists(Db::knowledge(), 'drug_name_relation_preferences')) {
                 $prefStmt = Db::knowledge()->prepare('INSERT INTO drug_name_relation_preferences
                     (company_uid, branch_uid, pair_key, generic_name, brand_name, display_drug_name, raw_example,
@@ -505,6 +554,7 @@ final class PrescriptionKnowledgeService
                 }
 
                 $this->upsertDrugMasterAndAliases($displayDrug, $finalGeneric, $finalBrand, $finalRaw);
+                $this->saveDrugDictionaryLearningForRow($parseJobId, $tenantId, $prescriptionId, $row);
             }
         } catch (Throwable) {
             // 補助学習DBの未反映・一時不調で処方箋確定保存を止めない。
@@ -650,6 +700,7 @@ final class PrescriptionKnowledgeService
                 }
 
                 $this->saveLayoutFieldLearningScore($context, $fieldKey, $fieldLabel, $fieldGroup, $correctionType, $confidence, $needsHumanCheck, $aiRaw, $finalRaw);
+                $this->saveVisualTextLearningScore($context, $tenantId, $parseJobId, $fieldKey, $fieldLabel, $fieldGroup, (string)($row['value_type'] ?? 'unknown'), $correctionType, $confidence, $needsHumanCheck, $aiRaw, $finalRaw);
 
                 // OCR補正ルールに昇格してよい低リスク項目だけ、次回AI解析前の候補として使う。
                 if (in_array($fieldGroup, ['medication','medical_institution'], true) && $normalizedAi !== '' && $normalizedFinal !== '' && $normalizedAi !== $normalizedFinal) {
@@ -664,9 +715,12 @@ final class PrescriptionKnowledgeService
     /**
      * 補助学習DBに蓄積された人間修正傾向をOpenAIの読み取りプロンプトへ渡す短いヒントにする。
      */
-    public function buildOpenAiLearningHints(int $limit = 18): string
+    public function buildOpenAiLearningHints(string $layoutFingerprint = '', int $limit = 18): string
     {
         $hints = [];
+        if (class_exists('DrugDictionaryService')) {
+            $hints[] = '- 辞書方針: ' . DrugDictionaryService::promptPolicyText();
+        }
         try {
             if (Db::tableExists(Db::knowledge(), 'prescription_confirmed_correction_scores')) {
                 $hasUseForPrompt = Db::columnExists(Db::knowledge(), 'prescription_confirmed_correction_scores', 'use_for_prompt');
@@ -727,6 +781,26 @@ final class PrescriptionKnowledgeService
                 ]);
                 foreach ($stmt->fetchAll() as $row) {
                     $hints[] = '- 画像品質傾向: ' . (string)($row['quality_bucket'] ?? 'unknown') . ' / ' . (string)($row['issue_flags'] ?? '') . ' では誤読が増えやすい。日付・数量・保険番号・薬品行の分離を慎重に行う。';
+                }
+            }
+
+            if (Db::tableExists(Db::knowledge(), 'prescription_visual_text_learning_scores')) {
+                $sql = 'SELECT field_label, field_group, value_type, text_style, quality_bucket, blur_bucket, brightness_bucket, contrast_bucket, correction_rate, miss_rate, overdetect_rate, observed_count
+                    FROM prescription_visual_text_learning_scores
+                    WHERE company_uid = :company_uid
+                      AND branch_uid = :branch_uid
+                      AND observed_count >= 3';
+                $params = [':company_uid' => current_company_uid(), ':branch_uid' => current_branch_uid()];
+                if ($layoutFingerprint !== '' && Db::columnExists(Db::knowledge(), 'prescription_visual_text_learning_scores', 'layout_fingerprint')) {
+                    $sql .= ' AND (layout_fingerprint = :layout_fingerprint OR layout_fingerprint = "unknown")';
+                    $params[':layout_fingerprint'] = $layoutFingerprint;
+                }
+                $sql .= ' ORDER BY correction_rate DESC, miss_rate DESC, overdetect_rate DESC, observed_count DESC, last_seen_at DESC LIMIT 6';
+                $stmt = Db::knowledge()->prepare($sql);
+                $stmt->execute($params);
+                foreach ($stmt->fetchAll() as $row) {
+                    $label = (string)($row['field_label'] ?? '文字項目');
+                    $hints[] = '- 文字品質傾向: ' . $label . ' は ' . (string)($row['text_style'] ?? 'unknown') . ' / ' . (string)($row['quality_bucket'] ?? 'unknown') . ' / ぼけ=' . (string)($row['blur_bucket'] ?? 'unknown') . ' で修正率 ' . round((float)($row['correction_rate'] ?? 0), 1) . '%。手書き・小さい文字・にじみ・薄い印字の場合は候補として残し要確認にする。';
                 }
             }
 
@@ -806,6 +880,7 @@ final class PrescriptionKnowledgeService
                 ':last_file_size_bytes' => $size ?: null,
                 ':last_parse_job_id' => $parseJobId,
             ]);
+            $this->updateImageQualityDetailIfSupported($parseJobId, $stored, $layoutMeta);
         } catch (Throwable) {
         }
     }
@@ -837,6 +912,31 @@ final class PrescriptionKnowledgeService
             $context['layout_fingerprint'] = hash('sha256', json_encode($features, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES));
             $context['quality_bucket'] = $this->imageQualityBucket($width, $height, $size);
             $context['quality_issue_flags'] = $this->imageQualityIssueFlags($width, $height, $size);
+            try {
+                if (Db::tableExists(Db::knowledge(), 'prescription_image_quality_learning_scores')) {
+                    $q = Db::knowledge()->prepare('SELECT quality_bucket, issue_flags, brightness_bucket, contrast_bucket, blur_bucket, ink_bleed_risk, estimated_text_size_bucket
+                        FROM prescription_image_quality_learning_scores
+                        WHERE company_uid = :company_uid AND branch_uid = :branch_uid AND last_parse_job_id = :parse_job_id
+                        ORDER BY last_seen_at DESC LIMIT 1');
+                    $q->execute([':company_uid' => current_company_uid(), ':branch_uid' => current_branch_uid(), ':parse_job_id' => $parseJobId]);
+                    $qr = $q->fetch() ?: [];
+                    if ($qr) {
+                        $context['quality_bucket'] = (string)($qr['quality_bucket'] ?? $context['quality_bucket']);
+                        $flags = array_filter([
+                            (string)($qr['issue_flags'] ?? ''),
+                            (string)($qr['brightness_bucket'] ?? ''),
+                            (string)($qr['contrast_bucket'] ?? ''),
+                            (string)($qr['blur_bucket'] ?? ''),
+                            (string)($qr['ink_bleed_risk'] ?? ''),
+                            (string)($qr['estimated_text_size_bucket'] ?? ''),
+                        ], static fn($v) => $v !== '' && $v !== 'unknown' && $v !== 'normal');
+                        if ($flags) {
+                            $context['quality_issue_flags'] = implode(',', array_unique($flags));
+                        }
+                    }
+                }
+            } catch (Throwable) {
+            }
         } catch (Throwable) {
         }
         return $context;
@@ -1156,5 +1256,299 @@ final class PrescriptionKnowledgeService
         }
     }
 
+
+
+    /**
+     * 確定薬品名を外部辞書（YJ/HOT9/一般名コード）に照合して、モデルを替えても使える薬品辞書学習として保存する。
+     * @param array<string,mixed> $row
+     */
+    private function saveDrugDictionaryLearningForRow(?int $parseJobId, int $tenantId, ?int $prescriptionId, array $row): void
+    {
+        if (!class_exists('DrugDictionaryService') || !DrugDictionaryService::available()) {
+            return;
+        }
+        if (!Db::tableExists(Db::knowledge(), 'prescription_drug_dictionary_candidate_events')) {
+            return;
+        }
+        try {
+            $match = DrugDictionaryService::matchConfirmedMedication($row);
+            $best = is_array($match['best'] ?? null) ? $match['best'] : [];
+            $candidates = is_array($match['candidates'] ?? null) ? $match['candidates'] : [];
+            if (!$best && !$candidates) {
+                return;
+            }
+            $finalDrug = trim((string)($row['final_drug_name'] ?? ''));
+            $finalGeneric = trim((string)($row['final_generic_name'] ?? ''));
+            $finalBrand = trim((string)($row['final_brand_name'] ?? ''));
+            $aiDrug = trim((string)($row['ai_drug_name'] ?? ''));
+            $actionType = (string)($row['action_type'] ?? 'confirmed');
+            if (!in_array($actionType, ['confirmed','edited','merged','deleted','added'], true)) {
+                $actionType = 'edited';
+            }
+            $stmt = Db::knowledge()->prepare('INSERT INTO prescription_drug_dictionary_candidate_events
+                (company_uid, branch_uid, tenant_id, parse_job_id, prescription_id, medication_sort_order,
+                 ai_drug_name, final_drug_name, final_generic_name, final_brand_name,
+                 selected_yj_code, selected_hot9_code, selected_generic_code, selected_generic_name,
+                 dictionary_score, relation_confidence, action_type, query_text, candidate_json, created_at)
+                VALUES
+                (:company_uid, :branch_uid, :tenant_id, :parse_job_id, :prescription_id, :medication_sort_order,
+                 :ai_drug_name, :final_drug_name, :final_generic_name, :final_brand_name,
+                 :selected_yj_code, :selected_hot9_code, :selected_generic_code, :selected_generic_name,
+                 :dictionary_score, :relation_confidence, :action_type, :query_text, :candidate_json, NOW())');
+            $stmt->execute([
+                ':company_uid' => current_company_uid(),
+                ':branch_uid' => current_branch_uid(),
+                ':tenant_id' => $tenantId,
+                ':parse_job_id' => $parseJobId,
+                ':prescription_id' => $prescriptionId,
+                ':medication_sort_order' => (int)($row['sort_order'] ?? 0),
+                ':ai_drug_name' => mb_substr($aiDrug, 0, 255),
+                ':final_drug_name' => mb_substr($finalDrug, 0, 255),
+                ':final_generic_name' => mb_substr($finalGeneric, 0, 255),
+                ':final_brand_name' => mb_substr($finalBrand, 0, 255),
+                ':selected_yj_code' => (string)($best['yj_code'] ?? ''),
+                ':selected_hot9_code' => (string)($best['hot9_code'] ?? ''),
+                ':selected_generic_code' => (string)($best['generic_code'] ?? ''),
+                ':selected_generic_name' => mb_substr((string)($best['generic_name'] ?? ''), 0, 255),
+                ':dictionary_score' => is_numeric($best['score'] ?? null) ? (float)$best['score'] : null,
+                ':relation_confidence' => (string)($best['relation_confidence'] ?? ''),
+                ':action_type' => $actionType,
+                ':query_text' => mb_substr((string)($match['query'] ?? ''), 0, 255),
+                ':candidate_json' => json_encode($candidates, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            ]);
+
+            if (Db::tableExists(Db::knowledge(), 'prescription_drug_dictionary_learning_scores')) {
+                $scoreStmt = Db::knowledge()->prepare('INSERT INTO prescription_drug_dictionary_learning_scores
+                    (company_uid, branch_uid, dictionary_key, yj_code, hot9_code, generic_code, generic_name,
+                     observed_count, confirmed_count, edited_count, merged_count, avg_dictionary_score, last_query_text, last_seen_at, created_at, updated_at)
+                    VALUES
+                    (:company_uid, :branch_uid, :dictionary_key, :yj_code, :hot9_code, :generic_code, :generic_name,
+                     1, :confirmed_count, :edited_count, :merged_count, :avg_dictionary_score, :last_query_text, NOW(), NOW(), NOW())
+                    ON DUPLICATE KEY UPDATE
+                        observed_count = observed_count + 1,
+                        confirmed_count = confirmed_count + VALUES(confirmed_count),
+                        edited_count = edited_count + VALUES(edited_count),
+                        merged_count = merged_count + VALUES(merged_count),
+                        avg_dictionary_score = ((avg_dictionary_score * (observed_count - 1)) + VALUES(avg_dictionary_score)) / GREATEST(observed_count, 1),
+                        generic_name = CASE WHEN VALUES(generic_name) <> "" THEN VALUES(generic_name) ELSE generic_name END,
+                        last_query_text = VALUES(last_query_text),
+                        last_seen_at = NOW(),
+                        updated_at = NOW()');
+                $genericCode = (string)($best['generic_code'] ?? '');
+                $yjCode = (string)($best['yj_code'] ?? '');
+                $dictionaryKey = $genericCode !== '' ? 'generic:' . $genericCode : ($yjCode !== '' ? 'yj:' . $yjCode : 'name:' . sha1($finalDrug . '|' . $finalGeneric . '|' . $finalBrand));
+                $scoreStmt->execute([
+                    ':company_uid' => current_company_uid(),
+                    ':branch_uid' => current_branch_uid(),
+                    ':dictionary_key' => $dictionaryKey,
+                    ':yj_code' => $yjCode,
+                    ':hot9_code' => (string)($best['hot9_code'] ?? ''),
+                    ':generic_code' => $genericCode,
+                    ':generic_name' => mb_substr((string)($best['generic_name'] ?? ''), 0, 255),
+                    ':confirmed_count' => $actionType === 'confirmed' ? 1 : 0,
+                    ':edited_count' => $actionType === 'edited' || $actionType === 'added' ? 1 : 0,
+                    ':merged_count' => $actionType === 'merged' || (string)($row['relation_type'] ?? '') === 'generic_brand_pair' ? 1 : 0,
+                    ':avg_dictionary_score' => is_numeric($best['score'] ?? null) ? (float)$best['score'] : 0.0,
+                    ':last_query_text' => mb_substr((string)($match['query'] ?? ''), 0, 255),
+                ]);
+            }
+        } catch (Throwable) {
+        }
+    }
+
+    /**
+     * 文字品質・手書き/印字/小さい文字/ぼけ/にじみ等と修正結果を紐づけて保存する。
+     */
+    private function saveVisualTextLearningScore(array $context, int $tenantId, ?int $parseJobId, string $fieldKey, string $fieldLabel, string $fieldGroup, string $valueType, string $correctionType, ?float $confidence, bool $needsHumanCheck, string $aiRaw, string $finalRaw): void
+    {
+        if (!Db::tableExists(Db::knowledge(), 'prescription_visual_text_learning_scores')) {
+            return;
+        }
+        try {
+            $layoutFingerprint = (string)($context['layout_fingerprint'] ?? 'unknown');
+            $qualityBucket = (string)($context['quality_bucket'] ?? 'unknown');
+            $issueFlags = (string)($context['quality_issue_flags'] ?? '');
+            $features = $this->visualTextFeatures($fieldKey, $fieldLabel, $fieldGroup, $valueType, $confidence, $needsHumanCheck, $aiRaw, $finalRaw, $qualityBucket, $issueFlags);
+            $edited = $correctionType === 'edited' ? 1 : 0;
+            $added = $correctionType === 'added' ? 1 : 0;
+            $emptied = $correctionType === 'emptied' ? 1 : 0;
+            $confirmed = $correctionType === 'confirmed' ? 1 : 0;
+
+            if (Db::tableExists(Db::knowledge(), 'prescription_visual_text_learning_events')) {
+                $eventStmt = Db::knowledge()->prepare('INSERT INTO prescription_visual_text_learning_events
+                    (company_uid, branch_uid, tenant_id, parse_job_id, layout_fingerprint, quality_bucket, issue_flags,
+                     field_key, field_label, field_group, value_type, text_style, print_type, estimated_text_size_bucket,
+                     blur_bucket, brightness_bucket, contrast_bucket, correction_type, confidence, needs_human_check,
+                     source_ai_value_sample, final_value_sample, visual_features_json, created_at)
+                    VALUES
+                    (:company_uid, :branch_uid, :tenant_id, :parse_job_id, :layout_fingerprint, :quality_bucket, :issue_flags,
+                     :field_key, :field_label, :field_group, :value_type, :text_style, :print_type, :estimated_text_size_bucket,
+                     :blur_bucket, :brightness_bucket, :contrast_bucket, :correction_type, :confidence, :needs_human_check,
+                     :source_ai_value_sample, :final_value_sample, :visual_features_json, NOW())');
+                $risk = $this->fieldRiskLevel($fieldGroup, $fieldKey, $fieldLabel);
+                $eventStmt->execute([
+                    ':company_uid' => current_company_uid(),
+                    ':branch_uid' => current_branch_uid(),
+                    ':tenant_id' => $tenantId,
+                    ':parse_job_id' => $parseJobId,
+                    ':layout_fingerprint' => $layoutFingerprint,
+                    ':quality_bucket' => $qualityBucket,
+                    ':issue_flags' => $issueFlags,
+                    ':field_key' => mb_substr($fieldKey, 0, 160),
+                    ':field_label' => mb_substr($fieldLabel !== '' ? $fieldLabel : $fieldKey, 0, 160),
+                    ':field_group' => $fieldGroup,
+                    ':value_type' => mb_substr($valueType, 0, 64),
+                    ':text_style' => $features['text_style'],
+                    ':print_type' => $features['print_type'],
+                    ':estimated_text_size_bucket' => $features['estimated_text_size_bucket'],
+                    ':blur_bucket' => $features['blur_bucket'],
+                    ':brightness_bucket' => $features['brightness_bucket'],
+                    ':contrast_bucket' => $features['contrast_bucket'],
+                    ':correction_type' => $correctionType,
+                    ':confidence' => $confidence,
+                    ':needs_human_check' => $needsHumanCheck ? 1 : 0,
+                    ':source_ai_value_sample' => mb_substr($this->learningSample($aiRaw, $risk), 0, 255),
+                    ':final_value_sample' => mb_substr($this->learningSample($finalRaw, $risk), 0, 255),
+                    ':visual_features_json' => json_encode($features, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ]);
+            }
+
+            $stmt = Db::knowledge()->prepare('INSERT INTO prescription_visual_text_learning_scores
+                (company_uid, branch_uid, layout_fingerprint, quality_bucket, field_key, field_label, field_group, value_type,
+                 text_style, print_type, estimated_text_size_bucket, blur_bucket, brightness_bucket, contrast_bucket,
+                 observed_count, edited_count, added_count, empty_count, confirmed_count, correction_rate, miss_rate, overdetect_rate,
+                 last_issue_flags, last_seen_at, created_at, updated_at)
+                VALUES
+                (:company_uid, :branch_uid, :layout_fingerprint, :quality_bucket, :field_key, :field_label, :field_group, :value_type,
+                 :text_style, :print_type, :estimated_text_size_bucket, :blur_bucket, :brightness_bucket, :contrast_bucket,
+                 1, :edited_count, :added_count, :empty_count, :confirmed_count, :correction_rate, :miss_rate, :overdetect_rate,
+                 :last_issue_flags, NOW(), NOW(), NOW())
+                ON DUPLICATE KEY UPDATE
+                    field_label = VALUES(field_label),
+                    field_group = VALUES(field_group),
+                    observed_count = observed_count + 1,
+                    edited_count = edited_count + VALUES(edited_count),
+                    added_count = added_count + VALUES(added_count),
+                    empty_count = empty_count + VALUES(empty_count),
+                    confirmed_count = confirmed_count + VALUES(confirmed_count),
+                    correction_rate = ((edited_count + VALUES(edited_count) + added_count + VALUES(added_count) + empty_count + VALUES(empty_count)) / GREATEST(observed_count + 1, 1)) * 100,
+                    miss_rate = ((added_count + VALUES(added_count)) / GREATEST(observed_count + 1, 1)) * 100,
+                    overdetect_rate = ((empty_count + VALUES(empty_count)) / GREATEST(observed_count + 1, 1)) * 100,
+                    last_issue_flags = VALUES(last_issue_flags),
+                    last_seen_at = NOW(),
+                    updated_at = NOW()');
+            $stmt->execute([
+                ':company_uid' => current_company_uid(),
+                ':branch_uid' => current_branch_uid(),
+                ':layout_fingerprint' => $layoutFingerprint,
+                ':quality_bucket' => $qualityBucket,
+                ':field_key' => mb_substr($fieldKey, 0, 160),
+                ':field_label' => mb_substr($fieldLabel !== '' ? $fieldLabel : $fieldKey, 0, 160),
+                ':field_group' => $fieldGroup,
+                ':value_type' => mb_substr($valueType, 0, 64),
+                ':text_style' => $features['text_style'],
+                ':print_type' => $features['print_type'],
+                ':estimated_text_size_bucket' => $features['estimated_text_size_bucket'],
+                ':blur_bucket' => $features['blur_bucket'],
+                ':brightness_bucket' => $features['brightness_bucket'],
+                ':contrast_bucket' => $features['contrast_bucket'],
+                ':edited_count' => $edited,
+                ':added_count' => $added,
+                ':empty_count' => $emptied,
+                ':confirmed_count' => $confirmed,
+                ':correction_rate' => ($edited + $added + $emptied) ? 100.0 : 0.0,
+                ':miss_rate' => $added ? 100.0 : 0.0,
+                ':overdetect_rate' => $emptied ? 100.0 : 0.0,
+                ':last_issue_flags' => mb_substr($issueFlags, 0, 500),
+            ]);
+        } catch (Throwable) {
+        }
+    }
+
+    /** @return array<string,string> */
+    private function visualTextFeatures(string $fieldKey, string $fieldLabel, string $fieldGroup, string $valueType, ?float $confidence, bool $needsHumanCheck, string $aiRaw, string $finalRaw, string $qualityBucket, string $issueFlags): array
+    {
+        $text = mb_strtolower($fieldKey . ' ' . $fieldLabel . ' ' . $valueType . ' ' . $issueFlags . ' ' . $aiRaw, 'UTF-8');
+        $textStyle = 'unknown';
+        if (str_contains($text, '手書') || str_contains($text, '署名') || str_contains($text, 'サイン')) {
+            $textStyle = 'handwritten_possible';
+        } elseif (str_contains($text, 'qr') || str_contains($text, 'コード')) {
+            $textStyle = 'machine_code';
+        } elseif ($fieldGroup === 'medication' && ($needsHumanCheck || ($confidence !== null && $confidence < 75))) {
+            $textStyle = 'printed_or_handwritten_uncertain';
+        } else {
+            $textStyle = 'printed_possible';
+        }
+
+        $printType = str_contains($textStyle, 'handwritten') ? 'handwritten' : (str_contains($textStyle, 'printed') ? 'printed' : 'unknown');
+        $estimated = str_contains($issueFlags, 'small_text') || str_contains($qualityBucket, 'low_res') ? 'small_text_risk' : 'unknown';
+        if ($estimated === 'unknown' && $confidence !== null && $confidence < 70) {
+            $estimated = 'small_or_unclear_risk';
+        }
+        $blur = str_contains($issueFlags, 'blur') ? 'blur_risk' : 'unknown';
+        $brightness = str_contains($issueFlags, 'brightness_dark') ? 'dark' : (str_contains($issueFlags, 'brightness_too_bright') ? 'too_bright' : 'unknown');
+        $contrast = str_contains($issueFlags, 'low_contrast') ? 'low_contrast' : 'unknown';
+        $bleed = str_contains($issueFlags, 'bleed') || str_contains($issueFlags, 'shadow') ? 'bleed_or_shadow_risk' : 'unknown';
+
+        return [
+            'text_style' => $textStyle,
+            'print_type' => $printType,
+            'estimated_text_size_bucket' => $estimated,
+            'blur_bucket' => $blur,
+            'brightness_bucket' => $brightness,
+            'contrast_bucket' => $contrast,
+            'bleed_bucket' => $bleed,
+            'field_risk' => $this->fieldRiskLevel($fieldGroup, $fieldKey, $fieldLabel),
+        ];
+    }
+
+    /**
+     * 画像品質学習テーブルに追加カラムがある場合、明るさ・ぼけ・補正プロファイルなども保存する。
+     * @param array<string,mixed> $stored
+     * @param array<string,mixed> $layoutMeta
+     */
+    private function updateImageQualityDetailIfSupported(?int $parseJobId, array $stored, array $layoutMeta): void
+    {
+        $quality = is_array($stored['quality_analysis'] ?? null) ? $stored['quality_analysis'] : (is_array($layoutMeta['quality_analysis'] ?? null) ? $layoutMeta['quality_analysis'] : []);
+        if (!$quality || !Db::tableExists(Db::knowledge(), 'prescription_image_quality_learning_scores')) {
+            return;
+        }
+        $pdo = Db::knowledge();
+        foreach (['brightness_bucket','contrast_bucket','blur_bucket','ink_bleed_risk','preprocess_profile'] as $column) {
+            if (!Db::columnExists($pdo, 'prescription_image_quality_learning_scores', $column)) {
+                return;
+            }
+        }
+        try {
+            $bucket = $this->imageQualityBucket((int)($stored['width'] ?? 0), (int)($stored['height'] ?? 0), (int)($stored['size'] ?? $stored['file_size_bytes'] ?? 0));
+            $stmt = $pdo->prepare('UPDATE prescription_image_quality_learning_scores
+                SET brightness_bucket = :brightness_bucket,
+                    contrast_bucket = :contrast_bucket,
+                    blur_bucket = :blur_bucket,
+                    ink_bleed_risk = :ink_bleed_risk,
+                    estimated_text_size_bucket = :estimated_text_size_bucket,
+                    preprocess_profile = :preprocess_profile,
+                    quality_json = :quality_json,
+                    updated_at = NOW()
+                WHERE company_uid = :company_uid
+                  AND branch_uid = :branch_uid
+                  AND quality_bucket = :quality_bucket
+                  AND last_parse_job_id = :parse_job_id');
+            $stmt->execute([
+                ':brightness_bucket' => (string)($quality['brightness_bucket'] ?? 'unknown'),
+                ':contrast_bucket' => (string)($quality['contrast_bucket'] ?? 'unknown'),
+                ':blur_bucket' => (string)($quality['blur_bucket'] ?? 'unknown'),
+                ':ink_bleed_risk' => (string)($quality['ink_bleed_risk'] ?? 'unknown'),
+                ':estimated_text_size_bucket' => (string)($quality['estimated_text_size_bucket'] ?? 'unknown'),
+                ':preprocess_profile' => (string)($quality['preprocess_profile'] ?? 'none'),
+                ':quality_json' => json_encode($quality, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                ':company_uid' => current_company_uid(),
+                ':branch_uid' => current_branch_uid(),
+                ':quality_bucket' => $bucket,
+                ':parse_job_id' => $parseJobId,
+            ]);
+        } catch (Throwable) {
+        }
+    }
 
 }
