@@ -1,6 +1,35 @@
 <?php
 declare(strict_types=1);
 
+final class OpenAiPrescriptionJsonParseException extends RuntimeException
+{
+    public function __construct(
+        string $message,
+        private readonly array $rawResponse,
+        private readonly string $outputText,
+        private readonly string $jsonError,
+        int $code = 0,
+        ?Throwable $previous = null
+    ) {
+        parent::__construct($message, $code, $previous);
+    }
+
+    public function rawResponse(): array
+    {
+        return $this->rawResponse;
+    }
+
+    public function outputText(): string
+    {
+        return $this->outputText;
+    }
+
+    public function jsonError(): string
+    {
+        return $this->jsonError;
+    }
+}
+
 final class OpenAiPrescriptionClient
 {
     public function extractFromImage(string $imagePath, string $mimeType, ?array $templateHint = null): array
@@ -57,14 +86,19 @@ final class OpenAiPrescriptionClient
                     'schema' => $schema,
                 ],
             ],
-            'max_output_tokens' => 3500,
+            'max_output_tokens' => (int)app_config('openai.max_output_tokens', 12000),
         ];
 
         $response = $this->postJson('https://api.openai.com/v1/responses', $payload, $apiKey);
         $jsonText = self::extractOutputText($response);
         $normalized = json_decode($jsonText, true);
         if (!is_array($normalized)) {
-            throw new RuntimeException('OpenAIレスポンスJSONの解析に失敗しました。');
+            throw new OpenAiPrescriptionJsonParseException(
+                'OpenAIレスポンスJSONの解析に失敗しました。IO診断で失敗時レスポンスを確認してください。',
+                $response,
+                $jsonText,
+                json_last_error_msg()
+            );
         }
 
         return [

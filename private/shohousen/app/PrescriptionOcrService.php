@@ -1,6 +1,18 @@
 <?php
 declare(strict_types=1);
 
+final class PrescriptionOcrAnalyzeException extends RuntimeException
+{
+    public function __construct(
+        string $message,
+        public readonly int $jobId,
+        int $code = 0,
+        ?Throwable $previous = null
+    ) {
+        parent::__construct($message, $code, $previous);
+    }
+}
+
 final class PrescriptionOcrService
 {
     public function __construct(
@@ -154,6 +166,36 @@ final class PrescriptionOcrService
                 'image_detail' => (string)app_config('openai.vision_detail', 'high'),
             ]);
         } catch (Throwable $e) {
+            if ($e instanceof OpenAiPrescriptionJsonParseException) {
+                $debug = new PrescriptionIoDebugService();
+                $debug->saveSnapshot($tenantId, $jobId, null, 'openai_raw_response_failed', '失敗時: OpenAI生レスポンス', $e->rawResponse(), [
+                    'model_name' => (string)app_config('openai.model', 'gpt-4o-mini'),
+                    'created_by_user_id' => (int)$user['id'],
+                ]);
+                $debug->saveSnapshot($tenantId, $jobId, null, 'openai_output_text_failed', '失敗時: output_text（JSON解析失敗）', $e->outputText(), [
+                    'model_name' => (string)app_config('openai.model', 'gpt-4o-mini'),
+                    'content_type' => 'text',
+                    'created_by_user_id' => (int)$user['id'],
+                ]);
+                $debug->saveSnapshot($tenantId, $jobId, null, 'openai_parse_error', '失敗時: JSON解析エラー情報', [
+                    'json_error' => $e->jsonError(),
+                    'output_length' => strlen($e->outputText()),
+                    'output_preview' => mb_substr($e->outputText(), 0, 500),
+                    'likely_causes' => [
+                        'max_output_tokens不足による途中切れ',
+                        'JSON Schema外のテキスト混入',
+                        'モデル側のrefusalまたはincomplete',
+                    ],
+                ], [
+                    'model_name' => (string)app_config('openai.model', 'gpt-4o-mini'),
+                    'created_by_user_id' => (int)$user['id'],
+                ]);
+                $pdo->prepare('UPDATE prescription_parse_jobs SET raw_response_json = :raw WHERE id = :id')
+                    ->execute([
+                        ':raw' => json_encode($e->rawResponse(), JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+                        ':id' => $jobId,
+                    ]);
+            }
             $pdo->prepare('UPDATE prescription_parse_jobs SET status = "failed", error_message = :message, updated_at = NOW() WHERE id = :id')
                 ->execute([':message' => mb_substr($e->getMessage(), 0, 2000), ':id' => $jobId]);
             $this->saveMetrics($jobId, $tenantId, $companyUid, $branchUid, [
@@ -167,7 +209,7 @@ final class PrescriptionOcrService
                 'openai_model' => (string)app_config('openai.model', 'gpt-4o-mini'),
                 'image_detail' => (string)app_config('openai.vision_detail', 'high'),
             ]);
-            throw $e;
+            throw new PrescriptionOcrAnalyzeException($e->getMessage(), $jobId, 0, $e);
         }
 
         return $jobId;
