@@ -108,8 +108,21 @@ final class PrescriptionOcrService
             $pdo->prepare('UPDATE prescription_parse_jobs SET status = "analyzing" WHERE id = :id')->execute([':id' => $jobId]);
             $ai = $this->openai->extractFromImage($ocrStored['path'], $ocrStored['mime_type'], $template);
             $openaiMs = self::elapsedMs($openaiStart);
+            $debug = new PrescriptionIoDebugService();
+            $debug->saveSnapshot($tenantId, $jobId, null, 'openai_raw_response', '読み込み直後: OpenAI生レスポンス', $ai['raw'], [
+                'model_name' => $ai['model'],
+                'created_by_user_id' => (int)$user['id'],
+            ]);
+            $debug->saveSnapshot($tenantId, $jobId, null, 'openai_normalized', '読み込み直後: AI正規化JSON', $ai['normalized'], [
+                'model_name' => $ai['model'],
+                'created_by_user_id' => (int)$user['id'],
+            ]);
             $correctionStart = microtime(true);
             $normalized = $this->correction->applyCandidates($ai['normalized']);
+            $debug->saveSnapshot($tenantId, $jobId, null, 'normalized_after_correction', '読み込み後: 補正適用後JSON', $normalized, [
+                'model_name' => $ai['model'],
+                'created_by_user_id' => (int)$user['id'],
+            ]);
             $detectedTemplateMeta['ai_layout_profile'] = $this->templateDetector->fieldProfileFromNormalized($normalized);
             if ($layoutFingerprint !== '') {
                 $this->knowledge->saveTemplateCandidate($jobId, $tenantId, $layoutFingerprint, $detectedTemplateMeta, false);

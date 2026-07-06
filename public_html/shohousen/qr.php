@@ -38,7 +38,7 @@ View::header('QRコード表示');
   </details>
   <p class="qr-caption">※MVPではJAHIS正式規格ではなく中間データQRです。本実装ではJAHIS項目マッピング確定後に差し替えてください。</p>
   <?php endif; ?>
-  <div class="button-row center"><a class="btn ghost" href="<?= h(app_url('/menu.php')) ?>">終了してメニューへ戻る</a><a class="btn primary" href="<?= h(app_url('/reception_detail.php?id=' . (string)$id)) ?>">受付データを見る</a></div>
+  <div class="button-row center"><a class="btn ghost" href="<?= h(app_url('/menu.php')) ?>">終了してメニューへ戻る</a><a class="btn ghost" href="<?= h(app_url('/prescription_io_debug.php?id=' . (string)$id)) ?>">IO診断を見る</a><a class="btn primary" href="<?= h(app_url('/reception_detail.php?id=' . (string)$id)) ?>">受付データを見る</a></div>
 </section>
 <script src="https://cdn.jsdelivr.net/npm/qrcode@1.5.4/build/qrcode.min.js" defer></script>
 <script src="<?= h(app_url('/assets/js/prescription_qr.js')) ?>" defer></script>

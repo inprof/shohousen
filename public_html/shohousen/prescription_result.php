@@ -327,6 +327,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       <p>画像は画面内に収まる大きさで表示します。必要に応じて別画面で確認できます。</p>
     </div>
     <a class="btn ghost" href="<?= h(app_url('/prescription_job_image.php?job_id=' . (string)$jobId)) ?>" target="_blank" rel="noopener">画像を別画面で開く</a>
+    <a class="btn ghost" href="<?= h(app_url('/prescription_io_debug.php?job_id=' . (string)$jobId)) ?>">IO診断を見る</a>
     <img src="<?= h(app_url('/prescription_job_image.php?job_id=' . (string)$jobId)) ?>" alt="撮影した処方箋画像" loading="lazy">
   </section>
 <?php endif; ?>
@@ -618,6 +619,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
 
   <div class="button-row end sticky-save-actions">
     <a class="btn ghost" href="<?= h(app_url('/prescription_scan.php')) ?>">再撮影</a>
+    <?php if ($jobId > 0): ?><a class="btn ghost" href="<?= h(app_url('/prescription_io_debug.php?job_id=' . (string)$jobId)) ?>">IO診断を見る</a><?php endif; ?>
     <button class="btn primary" type="submit">修正内容をDB保存して次へ</button>
   </div>
 </form>

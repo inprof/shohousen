@@ -623,6 +623,11 @@ function create_prescription_from_post(array $user, array $post): int
         $selectedFields = selected_prescription_fields_from_post($post);
         save_prescription_selected_fields($pdo, $tenantId, $prescriptionId, $parseJobId, $selectedFields);
 
+        $ioDebug = new PrescriptionIoDebugService();
+        $ioDebug->saveSnapshot($tenantId, $parseJobId, $prescriptionId, 'confirmed_post', '人間修正後: 確定POSTデータ', PrescriptionIoDebugService::confirmedPostSnapshot($post), [
+            'created_by_user_id' => (int)$user['id'],
+        ]);
+
         // 処方箋受付時に薬局が確認すべきルールを、人間修正後データで再判定して保存する。
         // 期限切れ、変更不可/署名、患者希望、一般名処方、必須項目、信頼度などはQR作成前の確認材料にする。
         $ruleChecks = [];
@@ -651,6 +656,13 @@ function create_prescription_from_post(array $user, array $post): int
             }
         } catch (Throwable) {
             // 補助学習DBの一時不調で拠点DBへの確定保存を止めない。
+        }
+
+        $savedForDebug = get_prescription($tenantId, $prescriptionId);
+        if ($savedForDebug) {
+            $ioDebug->saveSnapshot($tenantId, $parseJobId, $prescriptionId, 'db_saved_prescription', 'DB保存後: 処方箋保存データ', $savedForDebug, [
+                'created_by_user_id' => (int)$user['id'],
+            ]);
         }
 
         if ($parseJobId) {

@@ -99,6 +99,7 @@ View::header('確定保存完了');
 
   <div class="button-row end sticky-save-actions">
     <a class="btn ghost" href="<?= h(app_url('/reception_detail.php?id=' . (string)$id)) ?>">保存内容を詳細確認</a>
+    <a class="btn ghost" href="<?= h(app_url('/prescription_io_debug.php?id=' . (string)$id)) ?>">IO診断を見る</a>
     <a class="btn primary" href="<?= h(app_url('/qr.php?id=' . (string)$id)) ?>">QR作成へ進む</a>
   </div>
 </section>

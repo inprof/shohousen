@@ -56,6 +56,10 @@ final class PrescriptionQrService
         }
         $stmt = Db::branch()->prepare('UPDATE prescriptions SET qr_payload = :payload, updated_at = NOW() WHERE ' . $where);
         $stmt->execute($params);
+
+        (new PrescriptionIoDebugService())->saveSnapshot($tenantId, (int)($prescription['parse_job_id'] ?? 0) ?: null, $prescriptionId, 'qr_payload', '書き出し後: QR中間データ', $payload, [
+            'content_type' => 'text',
+        ]);
         return $payload;
     }
 }
