@@ -466,7 +466,11 @@ $stage3Json = is_array($stage3Value) ? $stage3Value : ($openAiJson ?: []);
 $stage3Source = $itemSnapshot ? (string)$itemSnapshot['stage'] : ($openAiJson ? 'raw_response.output_text(JSON)' : '未保存');
 
 $stage4Value = $outputSnapshot ? pjcmp_stage_snapshot_value($outputSnapshot) : null;
-$stage4Json = is_array($stage4Value) ? $stage4Value : $normalizedJson;
+if (is_array($stage4Value) && isset($stage4Value['normalized']) && is_array($stage4Value['normalized'])) {
+    $stage4Json = $stage4Value['normalized'];
+} else {
+    $stage4Json = is_array($stage4Value) ? $stage4Value : $normalizedJson;
+}
 $stage4Source = $outputSnapshot ? (string)$outputSnapshot['stage'] : ($normalizedJson ? 'prescription_parse_jobs.normalized_json' : '未保存');
 
 $rowsByGroup = pjcmp_build_four_stage_rows($stage1Text, $stage2Json, $stage3Json, $stage4Json);

@@ -117,14 +117,14 @@ final class OpenAiPrescriptionClient
                 'description' => '精度優先。OCR読取と項目化を高精度モデルで実行します。',
                 'ocr_model' => (string)app_config('openai.high.ocr_model', 'gpt-5.5'),
                 'structure_model' => (string)app_config('openai.high.structure_model', 'gpt-5.5'),
-                'mapping_model' => (string)app_config('openai.high.mapping_model', 'gpt-5.4-mini'),
+                'mapping_model' => (string)app_config('openai.high.mapping_model', 'gpt-4o-mini'),
             ],
             'middle' => [
                 'label' => '中価格',
                 'description' => '価格と精度のバランス。通常テスト向けです。',
-                'ocr_model' => (string)app_config('openai.middle.ocr_model', 'gpt-5.4'),
-                'structure_model' => (string)app_config('openai.middle.structure_model', 'gpt-5.4-mini'),
-                'mapping_model' => (string)app_config('openai.middle.mapping_model', 'gpt-5.4-mini'),
+                'ocr_model' => (string)app_config('openai.middle.ocr_model', 'gpt-4o'),
+                'structure_model' => (string)app_config('openai.middle.structure_model', 'gpt-4o-mini'),
+                'mapping_model' => (string)app_config('openai.middle.mapping_model', 'gpt-4o-mini'),
             ],
             'low' => [
                 'label' => '低価格',
@@ -202,10 +202,12 @@ final class OpenAiPrescriptionClient
         }
 
         $learningHints = '';
-        try {
-            $learningHints = (new PrescriptionKnowledgeService())->buildOpenAiLearningHints((string)($templateHint['layout_fingerprint'] ?? ''));
-        } catch (Throwable) {
-            $learningHints = '';
+        if ((bool)app_config('prescription_minimal_analysis.use_learning_hints', false)) {
+            try {
+                $learningHints = (new PrescriptionKnowledgeService())->buildOpenAiLearningHints((string)($templateHint['layout_fingerprint'] ?? ''));
+            } catch (Throwable) {
+                $learningHints = '';
+            }
         }
 
         $base64 = base64_encode((string)file_get_contents($imagePath));
@@ -287,10 +289,12 @@ final class OpenAiPrescriptionClient
         }
 
         $learningHints = '';
-        try {
-            $learningHints = (new PrescriptionKnowledgeService())->buildOpenAiLearningHints((string)($templateHint['layout_fingerprint'] ?? ''));
-        } catch (Throwable) {
-            $learningHints = '';
+        if ((bool)app_config('prescription_minimal_analysis.use_learning_hints', false)) {
+            try {
+                $learningHints = (new PrescriptionKnowledgeService())->buildOpenAiLearningHints((string)($templateHint['layout_fingerprint'] ?? ''));
+            } catch (Throwable) {
+                $learningHints = '';
+            }
         }
 
         $model = $this->modelForStage('structure');
@@ -468,7 +472,7 @@ final class OpenAiPrescriptionClient
     private static function ocrSystemPrompt(?array $templateHint, string $learningHints = ''): string
     {
         $template = '';
-        if ($templateHint) {
+        if ($templateHint && !(bool)app_config('prescription_minimal_analysis.ignore_template_hints', true)) {
             $template = "\n既知テンプレート情報: " . json_encode($templateHint, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
         }
         return <<<PROMPT
@@ -602,7 +606,7 @@ PROMPT;
     private static function structureSystemPrompt(?array $templateHint, string $learningHints = ''): string
     {
         $template = '';
-        if ($templateHint) {
+        if ($templateHint && !(bool)app_config('prescription_minimal_analysis.ignore_template_hints', true)) {
             $template = "\n既知テンプレート情報: " . json_encode($templateHint, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
         }
         return <<<PROMPT

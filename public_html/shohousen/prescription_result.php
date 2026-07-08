@@ -15,17 +15,25 @@ if (!$job) {
     $data = $job['normalized'];
 }
 
-$candidates = $data['_correction_candidates'] ?? [];
+$minimalAnalysisMode = (bool)app_config('prescription_minimal_analysis.enabled', true);
+$candidates = $minimalAnalysisMode ? [] : ($data['_correction_candidates'] ?? []);
 $patient = $data['patient'] ?? [];
 $insurance = $data['insurance'] ?? [];
 $prescription = $data['prescription'] ?? [];
 $medical = $data['medical_institution'] ?? [];
 $medications = is_array($data['medications'] ?? null) ? $data['medications'] : [];
 $dynamicFields = is_array($data['form_fields'] ?? null) ? $data['form_fields'] : [];
-$knowledgeService = new PrescriptionKnowledgeService();
-$fieldPreferences = method_exists($knowledgeService, 'branchFieldPreferenceMap')
-    ? $knowledgeService->branchFieldPreferenceMap()
-    : [];
+$fieldPreferences = [];
+if (!$minimalAnalysisMode) {
+    try {
+        $knowledgeService = new PrescriptionKnowledgeService();
+        $fieldPreferences = method_exists($knowledgeService, 'branchFieldPreferenceMap')
+            ? $knowledgeService->branchFieldPreferenceMap()
+            : [];
+    } catch (Throwable) {
+        $fieldPreferences = [];
+    }
+}
 $ruleEngine = new PrescriptionRuleEngineService();
 $ruleChecks = $ruleEngine->evaluateNormalized($data);
 $ruleSummary = PrescriptionRuleEngineService::summarize($ruleChecks);

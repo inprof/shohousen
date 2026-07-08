@@ -36,7 +36,7 @@ View::header('処方箋読込');
 <link rel="stylesheet" href="<?= h(app_url('/assets/css/prescription_scan.css')) ?>">
 <section class="page-title with-back">
   <a class="back-link" href="<?= h(app_url('/menu.php')) ?>">←</a>
-  <div><h1>処方箋読込</h1><p>スマホ/iPadで処方箋を撮影し、OpenAI APIで解析します。確定前に必ず人間確認を行います。</p></div>
+  <div><h1>処方箋読込</h1><p>スマホ/iPadで処方箋を撮影し、OpenAI APIで最小解析します。補助学習・再解析・AI項目配置は切り離し、OCR読取と項目JSON化だけを確認します。</p></div>
   <a class="btn ghost" href="<?= h(app_url('/prescription_json_viewer.php')) ?>">DB内JSON確認</a>
 </section>
 
@@ -57,11 +57,11 @@ View::header('処方箋読込');
         <select name="model_tier" id="modelTier" style="width:100%;max-width:520px;padding:10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;">
           <?php foreach ($modelTierOptions as $tierKey => $tier): ?>
             <option value="<?= h((string)$tierKey) ?>" <?= $tierKey === $defaultModelTier ? 'selected' : '' ?>>
-              <?= h((string)$tier['label']) ?>：OCR <?= h((string)$tier['ocr_model']) ?> / 項目化 <?= h((string)$tier['structure_model']) ?> / 書き出し <?= h((string)$tier['mapping_model']) ?>
+              <?= h((string)$tier['label']) ?>：OCR <?= h((string)$tier['ocr_model']) ?> / 項目化 <?= h((string)$tier['structure_model']) ?>
             </option>
           <?php endforeach; ?>
         </select>
-        <p class="hint left" id="modelTierHint" style="margin-top:8px;">高精度は精度優先、中価格はバランス、低価格はコスト優先です。選択したモデル構成は読み取りジョブとIO診断に保存されます。</p>
+        <p class="hint left" id="modelTierHint" style="margin-top:8px;">最小解析モードです。補助学習DBのヒント・保存、再解析テスト、AI項目配置は使わず、OCR読取と項目JSON化だけを検証します。</p>
       </div>
 
       <div class="capture-actions" aria-label="処方箋画像の取り込み方法">
