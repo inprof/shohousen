@@ -7,6 +7,7 @@ View::header('処方箋読込');
 <section class="page-title with-back">
   <a class="back-link" href="<?= h(app_url('/menu.php')) ?>">←</a>
   <div><h1>処方箋読込</h1><p>スマホ/iPadで処方箋を撮影し、OpenAI APIで解析します。確定前に必ず人間確認を行います。</p></div>
+  <a class="btn ghost" href="<?= h(app_url('/prescription_json_viewer.php')) ?>">DB内JSON確認</a>
 </section>
 
 <form class="card result-card scan-upload" method="post" action="<?= h(app_url('/prescription_analyze.php')) ?>" enctype="multipart/form-data" id="prescriptionScanForm">
