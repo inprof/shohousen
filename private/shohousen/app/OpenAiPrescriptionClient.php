@@ -48,6 +48,9 @@ final class OpenAiPrescriptionClient
     public static function modelTierOptions(): array
     {
         $configured = app_config('openai.model_tiers', []);
+        if (!is_array($configured) || $configured === []) {
+            $configured = app_config('openai_model_tiers', []);
+        }
         $defaults = self::defaultModelTiers();
         if (is_array($configured)) {
             foreach ($configured as $tier => $row) {
