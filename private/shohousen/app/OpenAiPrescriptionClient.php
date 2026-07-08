@@ -86,10 +86,15 @@ final class OpenAiPrescriptionClient
                     'schema' => $schema,
                 ],
             ],
-            'max_output_tokens' => (int)app_config('openai.max_output_tokens', 12000),
+            'max_output_tokens' => min(self::positiveIntConfig('openai.max_output_tokens', 9000), 9000),
         ];
 
-        $response = $this->postJson('https://api.openai.com/v1/responses', $payload, $apiKey);
+        $response = $this->postJson(
+            'https://api.openai.com/v1/responses',
+            $payload,
+            $apiKey,
+            max(180, self::positiveIntConfig('openai.vision_timeout_seconds', self::positiveIntConfig('openai.timeout_seconds', 180)))
+        );
         $jsonText = self::extractOutputText($response);
         $normalized = json_decode($jsonText, true);
         if (!is_array($normalized)) {
@@ -156,10 +161,15 @@ final class OpenAiPrescriptionClient
                     'schema' => self::displayMappingSchema(),
                 ],
             ],
-            'max_output_tokens' => (int)app_config('prescription_ai_mapping.max_output_tokens', 9000),
+            'max_output_tokens' => min(self::positiveIntConfig('prescription_ai_mapping.max_output_tokens', 6000), 6000),
         ];
 
-        $response = $this->postJson('https://api.openai.com/v1/responses', $payload, $apiKey);
+        $response = $this->postJson(
+            'https://api.openai.com/v1/responses',
+            $payload,
+            $apiKey,
+            max(120, self::positiveIntConfig('prescription_ai_mapping.timeout_seconds', self::positiveIntConfig('openai.timeout_seconds', 120)))
+        );
         $jsonText = self::extractOutputText($response);
         $mapping = json_decode($jsonText, true);
         if (!is_array($mapping)) {
@@ -176,12 +186,20 @@ final class OpenAiPrescriptionClient
         return $mapping;
     }
 
-    private function postJson(string $url, array $payload, string $apiKey): array
+    private function postJson(string $url, array $payload, string $apiKey, ?int $timeoutSeconds = null): array
     {
         $ch = curl_init($url);
         if ($ch === false) {
             throw new RuntimeException('curl初期化に失敗しました。');
         }
+
+        $timeout = max(30, (int)($timeoutSeconds ?? self::positiveIntConfig('openai.timeout_seconds', 180)));
+        $connectTimeout = self::positiveIntConfig('openai.connect_timeout_seconds', 20);
+        $postFields = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        if (!is_string($postFields)) {
+            throw new RuntimeException('OpenAI API送信用JSONの作成に失敗しました。');
+        }
+
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
@@ -189,16 +207,23 @@ final class OpenAiPrescriptionClient
                 'Authorization: Bearer ' . $apiKey,
                 'Content-Type: application/json',
             ],
-            CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            CURLOPT_TIMEOUT => (int)app_config('openai.timeout_seconds', 60),
+            CURLOPT_POSTFIELDS => $postFields,
+            CURLOPT_TIMEOUT => $timeout,
+            CURLOPT_CONNECTTIMEOUT => $connectTimeout,
+            CURLOPT_NOSIGNAL => true,
         ]);
         $body = curl_exec($ch);
         $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+        $errno = (int)curl_errno($ch);
         $error = curl_error($ch);
         curl_close($ch);
 
         if ($body === false || $body === '') {
-            throw new RuntimeException('OpenAI API通信に失敗しました: ' . $error);
+            $suffix = '';
+            if ($errno === CURLE_OPERATION_TIMEDOUT) {
+                $suffix = sprintf(' 現在のOpenAI通信タイムアウトは%d秒です。config.phpの openai.timeout_seconds / openai.vision_timeout_seconds / prescription_ai_mapping.timeout_seconds と、public_html/shohousen/.user.ini の max_execution_time を確認してください。', $timeout);
+            }
+            throw new RuntimeException('OpenAI API通信に失敗しました: ' . ($error !== '' ? $error : 'レスポンス本文が空です。') . $suffix);
         }
         $decoded = json_decode((string)$body, true);
         if (!is_array($decoded)) {
@@ -209,6 +234,16 @@ final class OpenAiPrescriptionClient
             throw new RuntimeException('OpenAI APIエラー: ' . $message);
         }
         return $decoded;
+    }
+
+    private static function positiveIntConfig(string $key, int $default): int
+    {
+        $value = app_config($key, $default);
+        if (!is_numeric($value)) {
+            return $default;
+        }
+        $int = (int)$value;
+        return $int > 0 ? $int : $default;
     }
 
     private static function extractOutputText(array $response): string
