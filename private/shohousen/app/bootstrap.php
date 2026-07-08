@@ -82,6 +82,7 @@ require_once __DIR__ . '/PrescriptionImagePreprocessor.php';
 require_once __DIR__ . '/PrescriptionTemplateDetector.php';
 require_once __DIR__ . '/PrescriptionKnowledgeService.php';
 require_once __DIR__ . '/PrescriptionCorrectionService.php';
+require_once __DIR__ . '/PrescriptionAiRuleMapperService.php';
 require_once __DIR__ . '/PrescriptionOcrService.php';
 require_once __DIR__ . '/PrescriptionIoDebugService.php';
 require_once __DIR__ . '/PrescriptionFeedbackService.php';

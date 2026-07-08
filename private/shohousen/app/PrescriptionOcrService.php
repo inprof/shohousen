@@ -21,6 +21,7 @@ final class PrescriptionOcrService
         private readonly PrescriptionKnowledgeService $knowledge = new PrescriptionKnowledgeService(),
         private readonly PrescriptionCorrectionService $correction = new PrescriptionCorrectionService(),
         private readonly PrescriptionTemplateDetector $templateDetector = new PrescriptionTemplateDetector(),
+        private readonly PrescriptionAiRuleMapperService $aiRuleMapper = new PrescriptionAiRuleMapperService(),
     ) {}
 
     public function analyzeUploaded(array $file, array $user, string $sourceType): int
@@ -129,12 +130,38 @@ final class PrescriptionOcrService
                 'model_name' => $ai['model'],
                 'created_by_user_id' => (int)$user['id'],
             ]);
+            $this->knowledge->savePipelineTrace($tenantId, $jobId, null, 'openai_normalized', 'read', $ai['normalized'], [
+                'model_name' => $ai['model'],
+                'layout_fingerprint' => $layoutFingerprint,
+            ]);
             $correctionStart = microtime(true);
-            $normalized = $this->correction->applyCandidates($ai['normalized']);
-            $debug->saveSnapshot($tenantId, $jobId, null, 'normalized_after_correction', '読み込み後: 補正適用後JSON', $normalized, [
+            $normalizedAfterCorrection = $this->correction->applyCandidates($ai['normalized']);
+            $debug->saveSnapshot($tenantId, $jobId, null, 'normalized_after_correction', '読み込み後: PHP補正適用後JSON', $normalizedAfterCorrection, [
                 'model_name' => $ai['model'],
                 'created_by_user_id' => (int)$user['id'],
             ]);
+
+            $mappingStart = microtime(true);
+            $mappingResult = $this->aiRuleMapper->mapForDisplay($normalizedAfterCorrection, $template, $detectedTemplateMeta, $jobId, $tenantId);
+            $mappingMs = self::elapsedMs($mappingStart);
+            $normalized = $mappingResult['normalized'];
+            $debug->saveSnapshot($tenantId, $jobId, null, 'ai_rule_mapped_display', 'AI項目化後: ルール・表示フォーム用JSON', [
+                'used_ai' => $mappingResult['used_ai'],
+                'error' => $mappingResult['error'],
+                'mapping' => $mappingResult['mapping'],
+                'normalized' => $normalized,
+            ], [
+                'model_name' => $ai['model'],
+                'created_by_user_id' => (int)$user['id'],
+                'mapping_ms' => $mappingMs,
+            ]);
+            $this->knowledge->savePipelineTrace($tenantId, $jobId, null, 'ai_rule_mapped_display', 'read', $normalized, [
+                'model_name' => $ai['model'],
+                'layout_fingerprint' => $layoutFingerprint,
+                'mapping_ms' => $mappingMs,
+                'used_ai' => $mappingResult['used_ai'],
+            ]);
+
             $detectedTemplateMeta['ai_layout_profile'] = $this->templateDetector->fieldProfileFromNormalized($normalized);
             if ($layoutFingerprint !== '') {
                 $this->knowledge->saveTemplateCandidate($jobId, $tenantId, $layoutFingerprint, $detectedTemplateMeta, false);

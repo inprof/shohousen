@@ -320,6 +320,14 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
 <?php if (!empty($data['warnings'])): ?>
   <div class="alert info"><strong>解析メモ</strong><br><?= h(implode(' / ', array_map('strval', $data['warnings']))) ?></div>
 <?php endif; ?>
+<?php if (!empty($data['_ai_rule_mapping'])): ?>
+  <?php $mapInfo = is_array($data['_ai_rule_mapping']) ? $data['_ai_rule_mapping'] : []; ?>
+  <div class="alert info">
+    <strong>AI項目化</strong><br>
+    <?= !empty($mapInfo['used_ai']) ? 'AIが処方箋ルール・拠点テンプレートに沿って表示フォーム用項目へ再配置しました。' : 'AI項目化はフォールバックでPHP正規化結果を使っています。' ?>
+    <?php if (!empty($mapInfo['error'])): ?><br>理由: <?= h((string)$mapInfo['error']) ?><?php endif; ?>
+  </div>
+<?php endif; ?>
 <?php if ($jobId > 0): ?>
   <section class="card ocr-source-preview">
     <div>

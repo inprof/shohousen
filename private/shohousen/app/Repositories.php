@@ -187,6 +187,7 @@ function selected_prescription_fields_from_post(array $post): array
     $selected = $post['dynamic_field_selected'] ?? [];
     $outputCandidates = $post['dynamic_field_output_candidate'] ?? [];
     $needsChecks = $post['dynamic_field_needs_human_check'] ?? [];
+    $displayOrders = $post['dynamic_field_display_order'] ?? [];
 
     // 解析結果確認画面では、まだ「使う/使わない」を選ばない。
     // その段階では original_dynamic_* として送られるため、ここで保存用の形式へ変換する。
@@ -200,6 +201,7 @@ function selected_prescription_fields_from_post(array $post): array
         $sections = $post['original_dynamic_source_section'] ?? [];
         $confidences = $post['original_dynamic_confidence'] ?? [];
         $needsChecks = $post['original_dynamic_needs_human_check'] ?? [];
+        $displayOrders = $post['original_dynamic_display_order'] ?? [];
         $selected = [];
         $outputCandidates = [];
     }
@@ -242,7 +244,7 @@ function selected_prescription_fields_from_post(array $post): array
             'needs_human_check' => isset($needsChecks[$i]) && (string)$needsChecks[$i] === '1',
             'is_selected' => $isSelected,
             'include_for_output' => $isSelected && (isset($outputCandidates[$i]) ? (string)$outputCandidates[$i] === '1' : true),
-            'display_order' => $i + 1,
+            'display_order' => is_numeric($displayOrders[$i] ?? null) ? (int)$displayOrders[$i] : ($i + 1),
         ];
     }
 
@@ -624,7 +626,11 @@ function create_prescription_from_post(array $user, array $post): int
         save_prescription_selected_fields($pdo, $tenantId, $prescriptionId, $parseJobId, $selectedFields);
 
         $ioDebug = new PrescriptionIoDebugService();
-        $ioDebug->saveSnapshot($tenantId, $parseJobId, $prescriptionId, 'confirmed_post', '人間修正後: 確定POSTデータ', PrescriptionIoDebugService::confirmedPostSnapshot($post), [
+        $confirmedSnapshot = PrescriptionIoDebugService::confirmedPostSnapshot($post);
+        $ioDebug->saveSnapshot($tenantId, $parseJobId, $prescriptionId, 'confirmed_post', '人間修正後: 確定POSTデータ', $confirmedSnapshot, [
+            'created_by_user_id' => (int)$user['id'],
+        ]);
+        (new PrescriptionKnowledgeService())->savePipelineTrace($tenantId, $parseJobId ?? 0, $prescriptionId, 'confirmed_post', 'write', $confirmedSnapshot, [
             'created_by_user_id' => (int)$user['id'],
         ]);
 
@@ -661,6 +667,9 @@ function create_prescription_from_post(array $user, array $post): int
         $savedForDebug = get_prescription($tenantId, $prescriptionId);
         if ($savedForDebug) {
             $ioDebug->saveSnapshot($tenantId, $parseJobId, $prescriptionId, 'db_saved_prescription', 'DB保存後: 処方箋保存データ', $savedForDebug, [
+                'created_by_user_id' => (int)$user['id'],
+            ]);
+            (new PrescriptionKnowledgeService())->savePipelineTrace($tenantId, $parseJobId ?? 0, $prescriptionId, 'db_saved_prescription', 'write', $savedForDebug, [
                 'created_by_user_id' => (int)$user['id'],
             ]);
         }

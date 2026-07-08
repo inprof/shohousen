@@ -108,6 +108,74 @@ final class OpenAiPrescriptionClient
         ];
     }
 
+
+    /**
+     * 読み取り済みJSONを、処方箋ルールに沿った画面表示・保存用項目へAIで再配置する。
+     * 画像再読取ではなく、JSON→表示項目マッピングの段階。
+     *
+     * @param array<string,mixed> $normalized
+     * @param array<string,mixed>|null $templateHint
+     * @param array<string,mixed> $ruleContext
+     * @return array<string,mixed>
+     */
+    public function mapNormalizedToDisplay(array $normalized, ?array $templateHint = null, array $ruleContext = []): array
+    {
+        $apiKey = trim((string)app_config('openai.api_key', ''));
+        if ($apiKey === '') {
+            if ((bool)app_config('app.demo_mode', false)) {
+                return self::demoDisplayMapping($normalized);
+            }
+            throw new RuntimeException('OpenAI APIキーが未設定です。');
+        }
+
+        $prompt = self::displayMappingPrompt($templateHint, $ruleContext);
+        $payload = [
+            'model' => (string)app_config('openai.model', 'gpt-4o-mini'),
+            'input' => [
+                [
+                    'role' => 'system',
+                    'content' => [
+                        ['type' => 'input_text', 'text' => $prompt],
+                    ],
+                ],
+                [
+                    'role' => 'user',
+                    'content' => [
+                        ['type' => 'input_text', 'text' => json_encode([
+                            'normalized_prescription_json' => $normalized,
+                            'rule_context' => $ruleContext,
+                        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)],
+                    ],
+                ],
+            ],
+            'text' => [
+                'format' => [
+                    'type' => 'json_schema',
+                    'name' => 'prescription_display_mapping',
+                    'strict' => true,
+                    'schema' => self::displayMappingSchema(),
+                ],
+            ],
+            'max_output_tokens' => (int)app_config('prescription_ai_mapping.max_output_tokens', 9000),
+        ];
+
+        $response = $this->postJson('https://api.openai.com/v1/responses', $payload, $apiKey);
+        $jsonText = self::extractOutputText($response);
+        $mapping = json_decode($jsonText, true);
+        if (!is_array($mapping)) {
+            throw new OpenAiPrescriptionJsonParseException(
+                'OpenAI表示マッピングJSONの解析に失敗しました。IO診断で失敗時レスポンスを確認してください。',
+                $response,
+                $jsonText,
+                json_last_error_msg()
+            );
+        }
+        $mapping = self::normalizeDisplayMapping($mapping);
+        $mapping['raw_response'] = $response;
+        $mapping['model'] = (string)app_config('openai.model', 'gpt-4o-mini');
+        return $mapping;
+    }
+
     private function postJson(string $url, array $payload, string $apiKey): array
     {
         $ch = curl_init($url);

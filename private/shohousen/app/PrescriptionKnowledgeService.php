@@ -196,25 +196,7 @@ final class PrescriptionKnowledgeService
                 $rows = array_merge($rows, $stmt->fetchAll());
             }
 
-            if (Db::tableExists(Db::knowledge(), 'prescription_visual_text_learning_scores')) {
-                $sql = 'SELECT field_label, field_group, value_type, text_style, quality_bucket, blur_bucket, brightness_bucket, contrast_bucket, correction_rate, miss_rate, overdetect_rate, observed_count
-                    FROM prescription_visual_text_learning_scores
-                    WHERE company_uid = :company_uid
-                      AND branch_uid = :branch_uid
-                      AND observed_count >= 3';
-                $params = [':company_uid' => current_company_uid(), ':branch_uid' => current_branch_uid()];
-                if ($layoutFingerprint !== '' && Db::columnExists(Db::knowledge(), 'prescription_visual_text_learning_scores', 'layout_fingerprint')) {
-                    $sql .= ' AND (layout_fingerprint = :layout_fingerprint OR layout_fingerprint = "unknown")';
-                    $params[':layout_fingerprint'] = $layoutFingerprint;
-                }
-                $sql .= ' ORDER BY correction_rate DESC, miss_rate DESC, overdetect_rate DESC, observed_count DESC, last_seen_at DESC LIMIT 6';
-                $stmt = Db::knowledge()->prepare($sql);
-                $stmt->execute($params);
-                foreach ($stmt->fetchAll() as $row) {
-                    $label = (string)($row['field_label'] ?? '文字項目');
-                    $hints[] = '- 文字品質傾向: ' . $label . ' は ' . (string)($row['text_style'] ?? 'unknown') . ' / ' . (string)($row['quality_bucket'] ?? 'unknown') . ' / ぼけ=' . (string)($row['blur_bucket'] ?? 'unknown') . ' で修正率 ' . round((float)($row['correction_rate'] ?? 0), 1) . '%。手書き・小さい文字・にじみ・薄い印字の場合は候補として残し要確認にする。';
-                }
-            }
+
 
             if (Db::tableExists(Db::knowledge(), 'drug_name_relation_preferences')) {
                 $like = '%' . $value . '%';
@@ -585,25 +567,7 @@ final class PrescriptionKnowledgeService
             }
 
             $prefStmt = null;
-            if (Db::tableExists(Db::knowledge(), 'prescription_visual_text_learning_scores')) {
-                $sql = 'SELECT field_label, field_group, value_type, text_style, quality_bucket, blur_bucket, brightness_bucket, contrast_bucket, correction_rate, miss_rate, overdetect_rate, observed_count
-                    FROM prescription_visual_text_learning_scores
-                    WHERE company_uid = :company_uid
-                      AND branch_uid = :branch_uid
-                      AND observed_count >= 3';
-                $params = [':company_uid' => current_company_uid(), ':branch_uid' => current_branch_uid()];
-                if ($layoutFingerprint !== '' && Db::columnExists(Db::knowledge(), 'prescription_visual_text_learning_scores', 'layout_fingerprint')) {
-                    $sql .= ' AND (layout_fingerprint = :layout_fingerprint OR layout_fingerprint = "unknown")';
-                    $params[':layout_fingerprint'] = $layoutFingerprint;
-                }
-                $sql .= ' ORDER BY correction_rate DESC, miss_rate DESC, overdetect_rate DESC, observed_count DESC, last_seen_at DESC LIMIT 6';
-                $stmt = Db::knowledge()->prepare($sql);
-                $stmt->execute($params);
-                foreach ($stmt->fetchAll() as $row) {
-                    $label = (string)($row['field_label'] ?? '文字項目');
-                    $hints[] = '- 文字品質傾向: ' . $label . ' は ' . (string)($row['text_style'] ?? 'unknown') . ' / ' . (string)($row['quality_bucket'] ?? 'unknown') . ' / ぼけ=' . (string)($row['blur_bucket'] ?? 'unknown') . ' で修正率 ' . round((float)($row['correction_rate'] ?? 0), 1) . '%。手書き・小さい文字・にじみ・薄い印字の場合は候補として残し要確認にする。';
-                }
-            }
+
 
             if (Db::tableExists(Db::knowledge(), 'drug_name_relation_preferences')) {
                 $prefStmt = Db::knowledge()->prepare('INSERT INTO drug_name_relation_preferences
@@ -1120,6 +1084,55 @@ final class PrescriptionKnowledgeService
             $update->execute([':approved_template_id' => $templateId ?: null, ':id' => (int)$candidate['id']]);
         } catch (Throwable $e) {
             $this->logLearningError('template_candidate_promote', $e, ['fingerprint' => $fingerprint]);
+        }
+    }
+
+
+    /**
+     * OCR処理の各段階を補助学習DBへ保存する。
+     * 患者情報を含むため公開ファイルには出さず、補助学習DBの trace テーブルで管理する。
+     *
+     * @param array<string,mixed>|array<int,mixed> $payload
+     * @param array<string,mixed> $meta
+     */
+    public function savePipelineTrace(int $tenantId, int $parseJobId, ?int $prescriptionId, string $stage, string $sourceKind, array $payload, array $meta = []): void
+    {
+        if (!Db::tableExists(Db::knowledge(), 'prescription_ocr_pipeline_traces')) {
+            return;
+        }
+        try {
+            $json = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            if (!is_string($json) || $json === '') {
+                $json = '{}';
+            }
+            $metaJson = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $stmt = Db::knowledge()->prepare('INSERT INTO prescription_ocr_pipeline_traces
+                (company_uid, branch_uid, tenant_id, parse_job_id, prescription_id, stage, source_kind, model_name,
+                 layout_fingerprint, quality_bucket, payload_hash, payload_bytes, payload_json, meta_json, created_at)
+                VALUES
+                (:company_uid, :branch_uid, :tenant_id, :parse_job_id, :prescription_id, :stage, :source_kind, :model_name,
+                 :layout_fingerprint, :quality_bucket, :payload_hash, :payload_bytes, :payload_json, :meta_json, NOW())');
+            $stmt->execute([
+                ':company_uid' => current_company_uid(),
+                ':branch_uid' => current_branch_uid(),
+                ':tenant_id' => $tenantId,
+                ':parse_job_id' => $parseJobId,
+                ':prescription_id' => $prescriptionId,
+                ':stage' => mb_substr($stage, 0, 64),
+                ':source_kind' => in_array($sourceKind, ['read','write'], true) ? $sourceKind : 'read',
+                ':model_name' => mb_substr((string)($meta['model_name'] ?? app_config('openai.model', '')), 0, 120),
+                ':layout_fingerprint' => mb_substr((string)($meta['layout_fingerprint'] ?? ''), 0, 191) ?: null,
+                ':quality_bucket' => mb_substr((string)($meta['quality_bucket'] ?? ''), 0, 64) ?: null,
+                ':payload_hash' => hash('sha256', $json),
+                ':payload_bytes' => strlen($json),
+                ':payload_json' => $json,
+                ':meta_json' => is_string($metaJson) && $metaJson !== '' ? $metaJson : null,
+            ]);
+        } catch (Throwable $e) {
+            $this->logLearningError('pipeline_trace_save', $e, [
+                'parse_job_id' => $parseJobId,
+                'stage' => $stage,
+            ]);
         }
     }
 
