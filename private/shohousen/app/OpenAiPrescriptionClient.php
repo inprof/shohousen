@@ -32,44 +32,195 @@ final class OpenAiPrescriptionJsonParseException extends RuntimeException
 
 final class OpenAiPrescriptionClient
 {
+    private string $modelTier;
+
+    public function __construct(?string $modelTier = null)
+    {
+        $this->modelTier = self::normalizeModelTier($modelTier ?? (string)app_config('openai.default_model_tier', 'high'));
+    }
+
+    public function withModelTier(?string $modelTier): self
+    {
+        return new self($modelTier ?: $this->modelTier);
+    }
+
+    /** @return array<string,array<string,string>> */
+    public static function modelTierOptions(): array
+    {
+        $configured = app_config('openai.model_tiers', []);
+        $defaults = self::defaultModelTiers();
+        if (is_array($configured)) {
+            foreach ($configured as $tier => $row) {
+                if (!is_string($tier) || !is_array($row)) {
+                    continue;
+                }
+                $tier = self::normalizeModelTier($tier);
+                foreach (['label','description','ocr_model','structure_model','mapping_model'] as $key) {
+                    if (isset($row[$key]) && is_string($row[$key]) && trim($row[$key]) !== '') {
+                        $defaults[$tier][$key] = trim($row[$key]);
+                    }
+                }
+            }
+        }
+        return $defaults;
+    }
+
+    public static function normalizeModelTier(?string $tier): string
+    {
+        $tier = strtolower(trim((string)$tier));
+        $aliases = [
+            'hi' => 'high',
+            'high' => 'high',
+            'premium' => 'high',
+            'accurate' => 'high',
+            '高精度' => 'high',
+            'middle' => 'middle',
+            'mid' => 'middle',
+            'standard' => 'middle',
+            'balanced' => 'middle',
+            '中価格' => 'middle',
+            'low' => 'low',
+            'cheap' => 'low',
+            'economy' => 'low',
+            '低価格' => 'low',
+        ];
+        return $aliases[$tier] ?? 'high';
+    }
+
+    /** @return array<string,string> */
+    public static function modelTierSummary(?string $tier): array
+    {
+        $tier = self::normalizeModelTier($tier);
+        $options = self::modelTierOptions();
+        $row = $options[$tier] ?? $options['high'];
+        return [
+            'tier' => $tier,
+            'label' => $row['label'],
+            'description' => $row['description'],
+            'ocr_model' => $row['ocr_model'],
+            'structure_model' => $row['structure_model'],
+            'mapping_model' => $row['mapping_model'],
+            'summary' => $tier . ':ocr=' . $row['ocr_model'] . ',structure=' . $row['structure_model'] . ',mapping=' . $row['mapping_model'],
+        ];
+    }
+
+    /** @return array<string,array<string,string>> */
+    private static function defaultModelTiers(): array
+    {
+        $fallback = (string)app_config('openai.model', 'gpt-4o-mini');
+        return [
+            'high' => [
+                'label' => '高精度',
+                'description' => '精度優先。OCR読取と項目化を高精度モデルで実行します。',
+                'ocr_model' => (string)app_config('openai.high.ocr_model', 'gpt-5.5'),
+                'structure_model' => (string)app_config('openai.high.structure_model', 'gpt-5.5'),
+                'mapping_model' => (string)app_config('openai.high.mapping_model', 'gpt-5.4-mini'),
+            ],
+            'middle' => [
+                'label' => '中価格',
+                'description' => '価格と精度のバランス。通常テスト向けです。',
+                'ocr_model' => (string)app_config('openai.middle.ocr_model', 'gpt-5.4'),
+                'structure_model' => (string)app_config('openai.middle.structure_model', 'gpt-5.4-mini'),
+                'mapping_model' => (string)app_config('openai.middle.mapping_model', 'gpt-5.4-mini'),
+            ],
+            'low' => [
+                'label' => '低価格',
+                'description' => 'コスト優先。大量テスト・低コスト確認向けです。',
+                'ocr_model' => (string)app_config('openai.low.ocr_model', $fallback),
+                'structure_model' => (string)app_config('openai.low.structure_model', $fallback),
+                'mapping_model' => (string)app_config('openai.low.mapping_model', $fallback),
+            ],
+        ];
+    }
+
+    private function modelForStage(string $stage): string
+    {
+        $summary = self::modelTierSummary($this->modelTier);
+        return match ($stage) {
+            'ocr' => $summary['ocr_model'],
+            'structure' => $summary['structure_model'],
+            'mapping' => $summary['mapping_model'],
+            default => (string)app_config('openai.model', 'gpt-4o-mini'),
+        };
+    }
+
     public function extractFromImage(string $imagePath, string $mimeType, ?array $templateHint = null): array
+    {
+        $tierSummary = self::modelTierSummary($this->modelTier);
+        $ocr = $this->extractOcrFromImage($imagePath, $mimeType, $templateHint);
+        $structured = $this->structurePrescriptionFromOcr($ocr['structured_json'], $templateHint);
+
+        return [
+            'raw' => [
+                'pipeline_version' => 'ocr_4stage_v1',
+                'model_tier' => $tierSummary,
+                'model' => $structured['model'],
+                'ocr_model' => $ocr['model'],
+                'structure_model' => $structured['model'],
+                'ocr_raw_response' => $ocr['raw'],
+                'ocr_output' => $ocr['structured_json'],
+                'structure_raw_response' => $structured['raw'],
+                'structure_output' => $structured['item_json'],
+            ],
+            'ocr_raw_text' => $ocr['raw_text'],
+            'ocr_structured_json' => $ocr['structured_json'],
+            'prescription_item_json' => $structured['item_json'],
+            'normalized' => $structured['normalized'],
+            'model' => $structured['model'],
+            'models' => [
+                'tier' => $tierSummary['tier'],
+                'tier_label' => $tierSummary['label'],
+                'ocr' => $ocr['model'],
+                'structure' => $structured['model'],
+                'mapping' => $tierSummary['mapping_model'],
+            ],
+        ];
+    }
+
+    /**
+     * 1段階目: 画像から見えた文字を、推測で項目確定せず OCR 生テキスト + 行/ブロックJSON として保存する。
+     *
+     * @return array{raw:array<string,mixed>,raw_text:string,structured_json:array<string,mixed>,model:string}
+     */
+    public function extractOcrFromImage(string $imagePath, string $mimeType, ?array $templateHint = null): array
     {
         $apiKey = trim((string)app_config('openai.api_key', ''));
         if ($apiKey === '') {
             if ((bool)app_config('app.demo_mode', false)) {
+                $demo = self::demoOcrStructured();
                 return [
-                    'raw' => ['demo' => true],
-                    'normalized' => self::demoNormalized(),
+                    'raw' => ['demo' => true, 'stage' => 'ocr_raw_text'],
+                    'raw_text' => (string)$demo['raw_text'],
+                    'structured_json' => $demo,
                     'model' => 'demo',
                 ];
             }
             throw new RuntimeException('OpenAI APIキーが未設定です。');
         }
 
-        $schema = self::responseSchema();
         $learningHints = '';
         try {
             $learningHints = (new PrescriptionKnowledgeService())->buildOpenAiLearningHints((string)($templateHint['layout_fingerprint'] ?? ''));
         } catch (Throwable) {
             $learningHints = '';
         }
-        $prompt = self::systemPrompt($templateHint, $learningHints);
+
         $base64 = base64_encode((string)file_get_contents($imagePath));
         $detail = (string)app_config('openai.vision_detail', 'high');
-
+        $model = $this->modelForStage('ocr');
         $payload = [
-            'model' => (string)app_config('openai.model', 'gpt-4o-mini'),
+            'model' => $model,
             'input' => [
                 [
                     'role' => 'system',
                     'content' => [
-                        ['type' => 'input_text', 'text' => $prompt],
+                        ['type' => 'input_text', 'text' => self::ocrSystemPrompt($templateHint, $learningHints)],
                     ],
                 ],
                 [
                     'role' => 'user',
                     'content' => [
-                        ['type' => 'input_text', 'text' => '添付画像の処方箋を読み取り、指定JSON Schemaだけで出力してください。不明な項目は空文字またはnullにし、推測した場合はneeds_human_checkをtrueにしてください。'],
+                        ['type' => 'input_text', 'text' => '処方箋画像から、見えている文字をできる限りそのまま文字起こししてください。患者・保険・薬品などの項目確定は次工程で行うため、この段階では推測で補完しないでください。'],
                         [
                             'type' => 'input_image',
                             'image_url' => 'data:' . $mimeType . ';base64,' . $base64,
@@ -81,25 +232,101 @@ final class OpenAiPrescriptionClient
             'text' => [
                 'format' => [
                     'type' => 'json_schema',
-                    'name' => 'prescription_extraction',
+                    'name' => 'prescription_ocr_transcription',
                     'strict' => true,
-                    'schema' => $schema,
+                    'schema' => self::ocrResponseSchema(),
                 ],
             ],
-            'max_output_tokens' => min(self::positiveIntConfig('openai.max_output_tokens', 9000), 9000),
+            'max_output_tokens' => (int)app_config('openai.ocr_max_output_tokens', app_config('openai.max_output_tokens', 9000)),
         ];
 
-        $response = $this->postJson(
-            'https://api.openai.com/v1/responses',
-            $payload,
-            $apiKey,
-            max(180, self::positiveIntConfig('openai.vision_timeout_seconds', self::positiveIntConfig('openai.timeout_seconds', 180)))
-        );
+        $response = $this->postJson('https://api.openai.com/v1/responses', $payload, $apiKey, (int)app_config('openai.ocr_timeout_seconds', 180));
         $jsonText = self::extractOutputText($response);
-        $normalized = json_decode($jsonText, true);
-        if (!is_array($normalized)) {
+        $structured = json_decode($jsonText, true);
+        if (!is_array($structured)) {
             throw new OpenAiPrescriptionJsonParseException(
-                'OpenAIレスポンスJSONの解析に失敗しました。IO診断で失敗時レスポンスを確認してください。',
+                'OpenAI OCR文字起こしJSONの解析に失敗しました。IO診断で失敗時レスポンスを確認してください。',
+                $response,
+                $jsonText,
+                json_last_error_msg()
+            );
+        }
+
+        $structured = self::normalizeOcrStructured($structured);
+        return [
+            'raw' => $response,
+            'raw_text' => (string)$structured['raw_text'],
+            'structured_json' => $structured,
+            'model' => $model,
+        ];
+    }
+
+    /**
+     * 2段階目: OCR構造JSONを、処方箋の患者・保険・医療機関・薬品などの項目JSONへ書き出す。
+     *
+     * @param array<string,mixed> $ocrStructured
+     * @return array{raw:array<string,mixed>,item_json:array<string,mixed>,normalized:array<string,mixed>,model:string}
+     */
+    public function structurePrescriptionFromOcr(array $ocrStructured, ?array $templateHint = null): array
+    {
+        $apiKey = trim((string)app_config('openai.api_key', ''));
+        if ($apiKey === '') {
+            if ((bool)app_config('app.demo_mode', false)) {
+                $demo = self::demoNormalized();
+                return [
+                    'raw' => ['demo' => true, 'stage' => 'prescription_item_json'],
+                    'item_json' => $demo,
+                    'normalized' => $demo,
+                    'model' => 'demo',
+                ];
+            }
+            throw new RuntimeException('OpenAI APIキーが未設定です。');
+        }
+
+        $learningHints = '';
+        try {
+            $learningHints = (new PrescriptionKnowledgeService())->buildOpenAiLearningHints((string)($templateHint['layout_fingerprint'] ?? ''));
+        } catch (Throwable) {
+            $learningHints = '';
+        }
+
+        $model = $this->modelForStage('structure');
+        $payload = [
+            'model' => $model,
+            'input' => [
+                [
+                    'role' => 'system',
+                    'content' => [
+                        ['type' => 'input_text', 'text' => self::structureSystemPrompt($templateHint, $learningHints)],
+                    ],
+                ],
+                [
+                    'role' => 'user',
+                    'content' => [
+                        ['type' => 'input_text', 'text' => json_encode([
+                            'ocr_raw_text' => (string)($ocrStructured['raw_text'] ?? ''),
+                            'ocr_structured_json' => $ocrStructured,
+                        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE)],
+                    ],
+                ],
+            ],
+            'text' => [
+                'format' => [
+                    'type' => 'json_schema',
+                    'name' => 'prescription_extraction',
+                    'strict' => true,
+                    'schema' => self::responseSchema(),
+                ],
+            ],
+            'max_output_tokens' => (int)app_config('openai.structure_max_output_tokens', app_config('openai.max_output_tokens', 9000)),
+        ];
+
+        $response = $this->postJson('https://api.openai.com/v1/responses', $payload, $apiKey, (int)app_config('openai.structure_timeout_seconds', 180));
+        $jsonText = self::extractOutputText($response);
+        $itemJson = json_decode($jsonText, true);
+        if (!is_array($itemJson)) {
+            throw new OpenAiPrescriptionJsonParseException(
+                'OpenAI処方箋項目JSONの解析に失敗しました。IO診断で失敗時レスポンスを確認してください。',
                 $response,
                 $jsonText,
                 json_last_error_msg()
@@ -108,11 +335,11 @@ final class OpenAiPrescriptionClient
 
         return [
             'raw' => $response,
-            'normalized' => self::normalize($normalized),
-            'model' => (string)app_config('openai.model', 'gpt-4o-mini'),
+            'item_json' => $itemJson,
+            'normalized' => self::normalize($itemJson),
+            'model' => $model,
         ];
     }
-
 
     /**
      * 読み取り済みJSONを、処方箋ルールに沿った画面表示・保存用項目へAIで再配置する。
@@ -135,7 +362,7 @@ final class OpenAiPrescriptionClient
 
         $prompt = self::displayMappingPrompt($templateHint, $ruleContext);
         $payload = [
-            'model' => (string)app_config('openai.model', 'gpt-4o-mini'),
+            'model' => $this->modelForStage('mapping'),
             'input' => [
                 [
                     'role' => 'system',
@@ -161,15 +388,10 @@ final class OpenAiPrescriptionClient
                     'schema' => self::displayMappingSchema(),
                 ],
             ],
-            'max_output_tokens' => min(self::positiveIntConfig('prescription_ai_mapping.max_output_tokens', 6000), 6000),
+            'max_output_tokens' => (int)app_config('prescription_ai_mapping.max_output_tokens', 9000),
         ];
 
-        $response = $this->postJson(
-            'https://api.openai.com/v1/responses',
-            $payload,
-            $apiKey,
-            max(120, self::positiveIntConfig('prescription_ai_mapping.timeout_seconds', self::positiveIntConfig('openai.timeout_seconds', 120)))
-        );
+        $response = $this->postJson('https://api.openai.com/v1/responses', $payload, $apiKey, (int)app_config('prescription_ai_mapping.timeout_seconds', 120));
         $jsonText = self::extractOutputText($response);
         $mapping = json_decode($jsonText, true);
         if (!is_array($mapping)) {
@@ -182,7 +404,7 @@ final class OpenAiPrescriptionClient
         }
         $mapping = self::normalizeDisplayMapping($mapping);
         $mapping['raw_response'] = $response;
-        $mapping['model'] = (string)app_config('openai.model', 'gpt-4o-mini');
+        $mapping['model'] = $this->modelForStage('mapping');
         return $mapping;
     }
 
@@ -192,14 +414,6 @@ final class OpenAiPrescriptionClient
         if ($ch === false) {
             throw new RuntimeException('curl初期化に失敗しました。');
         }
-
-        $timeout = max(30, (int)($timeoutSeconds ?? self::positiveIntConfig('openai.timeout_seconds', 180)));
-        $connectTimeout = self::positiveIntConfig('openai.connect_timeout_seconds', 20);
-        $postFields = json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        if (!is_string($postFields)) {
-            throw new RuntimeException('OpenAI API送信用JSONの作成に失敗しました。');
-        }
-
         curl_setopt_array($ch, [
             CURLOPT_RETURNTRANSFER => true,
             CURLOPT_POST => true,
@@ -207,23 +421,17 @@ final class OpenAiPrescriptionClient
                 'Authorization: Bearer ' . $apiKey,
                 'Content-Type: application/json',
             ],
-            CURLOPT_POSTFIELDS => $postFields,
-            CURLOPT_TIMEOUT => $timeout,
-            CURLOPT_CONNECTTIMEOUT => $connectTimeout,
-            CURLOPT_NOSIGNAL => true,
+            CURLOPT_POSTFIELDS => json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
+            CURLOPT_TIMEOUT => max(30, $timeoutSeconds ?? (int)app_config('openai.timeout_seconds', 60)),
+            CURLOPT_CONNECTTIMEOUT => (int)app_config('openai.connect_timeout_seconds', 20),
         ]);
         $body = curl_exec($ch);
         $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
-        $errno = (int)curl_errno($ch);
         $error = curl_error($ch);
         curl_close($ch);
 
         if ($body === false || $body === '') {
-            $suffix = '';
-            if ($errno === CURLE_OPERATION_TIMEDOUT) {
-                $suffix = sprintf(' 現在のOpenAI通信タイムアウトは%d秒です。config.phpの openai.timeout_seconds / openai.vision_timeout_seconds / prescription_ai_mapping.timeout_seconds と、public_html/shohousen/.user.ini の max_execution_time を確認してください。', $timeout);
-            }
-            throw new RuntimeException('OpenAI API通信に失敗しました: ' . ($error !== '' ? $error : 'レスポンス本文が空です。') . $suffix);
+            throw new RuntimeException('OpenAI API通信に失敗しました: ' . $error);
         }
         $decoded = json_decode((string)$body, true);
         if (!is_array($decoded)) {
@@ -234,16 +442,6 @@ final class OpenAiPrescriptionClient
             throw new RuntimeException('OpenAI APIエラー: ' . $message);
         }
         return $decoded;
-    }
-
-    private static function positiveIntConfig(string $key, int $default): int
-    {
-        $value = app_config($key, $default);
-        if (!is_numeric($value)) {
-            return $default;
-        }
-        $int = (int)$value;
-        return $int > 0 ? $int : $default;
     }
 
     private static function extractOutputText(array $response): string
@@ -262,6 +460,162 @@ final class OpenAiPrescriptionClient
             }
         }
         throw new RuntimeException('OpenAI APIレスポンスから出力テキストを取得できません。');
+    }
+
+    private static function ocrSystemPrompt(?array $templateHint, string $learningHints = ''): string
+    {
+        $template = '';
+        if ($templateHint) {
+            $template = "\n既知テンプレート情報: " . json_encode($templateHint, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        }
+        return <<<PROMPT
+あなたは日本の処方箋画像のOCR文字起こしエンジンです。
+この段階の目的は「画像上に見える文字をそのまま取り出すこと」です。
+患者名・保険情報・薬品情報などの最終項目分類は次工程で行うため、この段階では推測で値を補完しないでください。
+
+必須方針:
+- 画像に見える文字を、上から下・左から右の自然な順番で raw_text にまとめてください。
+- 欄名と値が読める場合は同じ行または近い行として残してください。
+- 行単位の lines と、帳票上のまとまり単位の blocks を作ってください。
+- source_section には「上部左」「上部右」「患者欄」「保険欄」「処方欄」「医療機関欄」「備考欄」「下部」などを入れてください。
+- ぼけ、薄い印字、手書き疑い、罫線被り、小さい文字、読めない文字は visual_notes に残してください。
+- 読めない箇所は「□」「?」「読取不能」などで明示し、勝手に補完しないでください。
+- 薬品名や用法は、画像に見える改行・並びをなるべく維持してください。
+- JSON Schema以外の文章は出力しないでください。
+{$template}{$learningHints}
+PROMPT;
+    }
+
+    public static function ocrResponseSchema(): array
+    {
+        $lineSchema = [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => ['line_no', 'source_section', 'text', 'confidence', 'visual_notes'],
+            'properties' => [
+                'line_no' => ['type' => 'integer'],
+                'source_section' => ['type' => 'string'],
+                'text' => ['type' => 'string'],
+                'confidence' => ['type' => 'number'],
+                'visual_notes' => ['type' => 'string'],
+            ],
+        ];
+        $blockSchema = [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => ['block_id', 'source_section', 'text', 'confidence', 'visual_notes'],
+            'properties' => [
+                'block_id' => ['type' => 'string'],
+                'source_section' => ['type' => 'string'],
+                'text' => ['type' => 'string'],
+                'confidence' => ['type' => 'number'],
+                'visual_notes' => ['type' => 'string'],
+            ],
+        ];
+        return [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => ['raw_text', 'blocks', 'lines', 'warnings', 'overall_confidence'],
+            'properties' => [
+                'raw_text' => ['type' => 'string'],
+                'blocks' => ['type' => 'array', 'items' => $blockSchema],
+                'lines' => ['type' => 'array', 'items' => $lineSchema],
+                'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'overall_confidence' => ['type' => 'number'],
+            ],
+        ];
+    }
+
+    /** @param array<string,mixed> $value @return array<string,mixed> */
+    private static function normalizeOcrStructured(array $value): array
+    {
+        $rawText = trim((string)($value['raw_text'] ?? ''));
+        $lines = [];
+        foreach ((array)($value['lines'] ?? []) as $i => $line) {
+            if (!is_array($line)) {
+                continue;
+            }
+            $text = trim((string)($line['text'] ?? ''));
+            if ($text === '') {
+                continue;
+            }
+            $lines[] = [
+                'line_no' => is_numeric($line['line_no'] ?? null) ? (int)$line['line_no'] : $i + 1,
+                'source_section' => trim((string)($line['source_section'] ?? 'unknown')),
+                'text' => $text,
+                'confidence' => self::normalizeConfidencePercent($line['confidence'] ?? 0),
+                'visual_notes' => trim((string)($line['visual_notes'] ?? '')),
+            ];
+        }
+        $blocks = [];
+        foreach ((array)($value['blocks'] ?? []) as $i => $block) {
+            if (!is_array($block)) {
+                continue;
+            }
+            $text = trim((string)($block['text'] ?? ''));
+            if ($text === '') {
+                continue;
+            }
+            $blocks[] = [
+                'block_id' => trim((string)($block['block_id'] ?? ('block_' . ($i + 1)))),
+                'source_section' => trim((string)($block['source_section'] ?? 'unknown')),
+                'text' => $text,
+                'confidence' => self::normalizeConfidencePercent($block['confidence'] ?? 0),
+                'visual_notes' => trim((string)($block['visual_notes'] ?? '')),
+            ];
+        }
+        if ($rawText === '' && $lines) {
+            $rawText = implode("\n", array_map(static fn(array $line): string => (string)$line['text'], $lines));
+        }
+        return [
+            'raw_text' => $rawText,
+            'blocks' => $blocks,
+            'lines' => $lines,
+            'warnings' => array_values(array_filter(array_map('strval', (array)($value['warnings'] ?? [])))),
+            'overall_confidence' => self::normalizeConfidencePercent($value['overall_confidence'] ?? 0),
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private static function demoOcrStructured(): array
+    {
+        return self::normalizeOcrStructured([
+            'raw_text' => "処方箋\n氏名 山田 花子\n生年月日 昭和50年4月12日\n保険者番号 12345678\nカロナール錠200mg 1回1錠 1日3回 毎食後 5日分",
+            'blocks' => [
+                ['block_id' => 'patient', 'source_section' => '患者欄', 'text' => "氏名 山田 花子\n生年月日 昭和50年4月12日", 'confidence' => 92, 'visual_notes' => 'demo'],
+                ['block_id' => 'medication_1', 'source_section' => '処方欄', 'text' => 'カロナール錠200mg 1回1錠 1日3回 毎食後 5日分', 'confidence' => 90, 'visual_notes' => 'demo'],
+            ],
+            'lines' => [
+                ['line_no' => 1, 'source_section' => '患者欄', 'text' => '氏名 山田 花子', 'confidence' => 92, 'visual_notes' => 'demo'],
+                ['line_no' => 2, 'source_section' => '患者欄', 'text' => '生年月日 昭和50年4月12日', 'confidence' => 90, 'visual_notes' => 'demo'],
+                ['line_no' => 3, 'source_section' => '保険欄', 'text' => '保険者番号 12345678', 'confidence' => 91, 'visual_notes' => 'demo'],
+                ['line_no' => 4, 'source_section' => '処方欄', 'text' => 'カロナール錠200mg 1回1錠 1日3回 毎食後 5日分', 'confidence' => 90, 'visual_notes' => 'demo'],
+            ],
+            'warnings' => ['demo data'],
+            'overall_confidence' => 91,
+        ]);
+    }
+
+    private static function structureSystemPrompt(?array $templateHint, string $learningHints = ''): string
+    {
+        $template = '';
+        if ($templateHint) {
+            $template = "\n既知テンプレート情報: " . json_encode($templateHint, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE);
+        }
+        return <<<PROMPT
+あなたは日本の薬局で利用する処方箋OCRの項目書き出しエンジンです。
+入力は、前工程で作成されたOCR生テキストとOCR構造JSONです。
+この段階では画像を直接見ていないため、OCR構造JSONに存在しない情報を推測で補完しないでください。
+
+目的:
+- OCR生テキスト/行/ブロックを読み、患者情報・保険情報・処方箋情報・医療機関情報・薬品情報へ項目分けしてください。
+- 出力は必ず指定JSON Schemaに従ってください。
+- 読めない値、複数候補、OCRが怪しい値は空欄または needs_human_check=true にしてください。
+- 薬品名・用量・用法・日数・総量は medications 配列に集約してください。
+- 帳票上に存在する項目は form_fields に残してください。ただし薬品名元テキスト・辞書候補・推定候補などの補助学習専用データは form_fields に出さないでください。
+- 保険者番号は6桁または8桁、公費負担者番号は8桁、公費受給者番号は7桁、医療機関コードは通常7桁として扱ってください。条件に合わない場合は needs_human_check=true にしてください。
+{$template}{$learningHints}
+PROMPT;
     }
 
     private static function systemPrompt(?array $templateHint, string $learningHints = ''): string
@@ -416,211 +770,6 @@ PROMPT;
                 'overall_confidence' => ['type' => 'number'],
             ],
         ];
-    }
-
-
-    /**
-     * @param array<string,mixed> $normalized
-     * @return array<string,mixed>
-     */
-    private static function demoDisplayMapping(array $normalized): array
-    {
-        return [
-            'fixed' => [
-                'patient' => $normalized['patient'] ?? [],
-                'insurance' => $normalized['insurance'] ?? [],
-                'prescription' => $normalized['prescription'] ?? [],
-                'medical_institution' => $normalized['medical_institution'] ?? [],
-            ],
-            'display_fields' => is_array($normalized['form_fields'] ?? null) ? $normalized['form_fields'] : [],
-            'medications' => is_array($normalized['medications'] ?? null) ? $normalized['medications'] : [],
-            'warnings' => ['demo display mapping'],
-            'model' => 'demo',
-        ];
-    }
-
-    /** @return array<string,mixed> */
-    public static function displayMappingSchema(): array
-    {
-        $displayFieldSchema = [
-            'type' => 'object',
-            'additionalProperties' => false,
-            'required' => [
-                'field_key',
-                'field_label',
-                'field_group',
-                'value',
-                'ai_value',
-                'value_type',
-                'ui_template',
-                'source_section',
-                'confidence',
-                'needs_human_check',
-                'include_default',
-                'output_candidate',
-                'display_order',
-                'is_empty_cell',
-                'reason'
-            ],
-            'properties' => [
-                'field_key' => ['type' => 'string'],
-                'field_label' => ['type' => 'string'],
-                'field_group' => ['type' => 'string', 'enum' => ['patient', 'insurance', 'public_expense', 'prescription', 'medical_institution', 'medication', 'pharmacy', 'note', 'qr', 'other']],
-                'value' => ['type' => 'string'],
-                'ai_value' => ['type' => 'string'],
-                'value_type' => ['type' => 'string', 'enum' => ['text', 'date', 'number', 'code', 'person_name', 'drug', 'usage', 'amount', 'boolean', 'unknown']],
-                'ui_template' => ['type' => 'string', 'enum' => ['input', 'textarea', 'date', 'number', 'checkbox', 'select']],
-                'source_section' => ['type' => 'string'],
-                'confidence' => ['type' => 'number'],
-                'needs_human_check' => ['type' => 'boolean'],
-                'include_default' => ['type' => 'boolean'],
-                'output_candidate' => ['type' => 'boolean'],
-                'display_order' => ['type' => 'integer'],
-                'is_empty_cell' => ['type' => 'boolean'],
-                'reason' => ['type' => 'string'],
-            ],
-        ];
-
-        $medicationSchema = [
-            'type' => 'object',
-            'additionalProperties' => false,
-            'required' => ['drug_name', 'generic_name', 'brand_name', 'raw_drug_text', 'name_relation', 'dose_text', 'usage_text', 'days_count', 'amount_text', 'confidence', 'needs_human_check', 'reason'],
-            'properties' => [
-                'drug_name' => ['type' => 'string'],
-                'generic_name' => ['type' => 'string'],
-                'brand_name' => ['type' => 'string'],
-                'raw_drug_text' => ['type' => 'string'],
-                'name_relation' => ['type' => 'string', 'enum' => ['single', 'generic_brand_pair', 'multiple_candidates', 'unknown']],
-                'dose_text' => ['type' => 'string'],
-                'usage_text' => ['type' => 'string'],
-                'days_count' => ['type' => ['integer', 'null']],
-                'amount_text' => ['type' => 'string'],
-                'confidence' => ['type' => 'number'],
-                'needs_human_check' => ['type' => 'boolean'],
-                'reason' => ['type' => 'string'],
-            ],
-        ];
-
-        return [
-            'type' => 'object',
-            'additionalProperties' => false,
-            'required' => ['fixed', 'display_fields', 'medications', 'warnings'],
-            'properties' => [
-                'fixed' => [
-                    'type' => 'object',
-                    'additionalProperties' => false,
-                    'required' => ['patient', 'insurance', 'prescription', 'medical_institution'],
-                    'properties' => [
-                        'patient' => [
-                            'type' => 'object',
-                            'additionalProperties' => false,
-                            'required' => ['name', 'kana', 'birth_date', 'gender'],
-                            'properties' => [
-                                'name' => ['type' => 'string'],
-                                'kana' => ['type' => 'string'],
-                                'birth_date' => ['type' => 'string'],
-                                'gender' => ['type' => 'string'],
-                            ],
-                        ],
-                        'insurance' => [
-                            'type' => 'object',
-                            'additionalProperties' => false,
-                            'required' => ['insurance_no', 'insured_symbol_number', 'copay_rate'],
-                            'properties' => [
-                                'insurance_no' => ['type' => 'string'],
-                                'insured_symbol_number' => ['type' => 'string'],
-                                'copay_rate' => ['type' => 'string'],
-                            ],
-                        ],
-                        'prescription' => [
-                            'type' => 'object',
-                            'additionalProperties' => false,
-                            'required' => ['issued_on', 'expires_on'],
-                            'properties' => [
-                                'issued_on' => ['type' => 'string'],
-                                'expires_on' => ['type' => 'string'],
-                            ],
-                        ],
-                        'medical_institution' => [
-                            'type' => 'object',
-                            'additionalProperties' => false,
-                            'required' => ['code', 'name', 'doctor_name', 'phone'],
-                            'properties' => [
-                                'code' => ['type' => 'string'],
-                                'name' => ['type' => 'string'],
-                                'doctor_name' => ['type' => 'string'],
-                                'phone' => ['type' => 'string'],
-                            ],
-                        ],
-                    ],
-                ],
-                'display_fields' => ['type' => 'array', 'items' => $displayFieldSchema],
-                'medications' => ['type' => 'array', 'items' => $medicationSchema],
-                'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
-            ],
-        ];
-    }
-
-    /** @param array<string,mixed>|null $templateHint @param array<string,mixed> $ruleContext */
-    private static function displayMappingPrompt(?array $templateHint, array $ruleContext = []): string
-    {
-        $template = $templateHint ? json_encode($templateHint, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : '{}';
-        $context = $ruleContext ? json_encode($ruleContext, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : '{}';
-        return <<<PROMPT
-あなたは日本の薬局向け処方箋OCRの表示項目マッピングエンジンです。
-入力は、すでに画像から読み取られた処方箋JSONです。画像の再読取はしません。
-目的は、処方箋ルール、拠点テンプレート、過去の人間修正傾向に沿って、確認画面のフォームへ流し込める display_fields を作ることです。
-固定項目に入る患者・保険・交付日・医療機関は fixed にも反映してください。
-薬品名・用量・用法・日数・総量は medications に集約し、display_fields へ重複して出さないでください。
-画像上に書かれていない一般名候補・商品名候補・辞書候補は、確定項目として増やさないでください。
-保険者番号は6桁または8桁、公費負担者番号は8桁、公費受給者番号は7桁、医療機関コードは通常7桁です。形式が怪しい値はneeds_human_check=trueにしてください。
-AIが自信を持てないもの、補助学習で修正率が高い項目、空欄か値ありか不明な項目はneeds_human_check=trueにしてください。
-ui_template は、日付ならdate、長文ならtextarea、真偽値ならcheckbox、それ以外はinputを基本にしてください。
-出力は必ず指定JSON Schemaだけで返し、余計な文章は含めないでください。
-既知テンプレート: {$template}
-ルール/学習コンテキスト: {$context}
-PROMPT;
-    }
-
-    /** @param array<string,mixed> $mapping @return array<string,mixed> */
-    private static function normalizeDisplayMapping(array $mapping): array
-    {
-        $mapping['fixed'] = is_array($mapping['fixed'] ?? null) ? $mapping['fixed'] : [];
-        foreach (['patient', 'insurance', 'prescription', 'medical_institution'] as $section) {
-            if (!is_array($mapping['fixed'][$section] ?? null)) {
-                $mapping['fixed'][$section] = [];
-            }
-        }
-
-        $fields = [];
-        foreach (($mapping['display_fields'] ?? []) as $i => $field) {
-            if (!is_array($field)) {
-                continue;
-            }
-            $normalized = self::normalizeFormField([
-                'field_key' => $field['field_key'] ?? '',
-                'field_label' => $field['field_label'] ?? '',
-                'field_group' => $field['field_group'] ?? 'other',
-                'value' => $field['value'] ?? '',
-                'value_type' => $field['value_type'] ?? 'text',
-                'source_section' => $field['source_section'] ?? '',
-                'confidence' => $field['confidence'] ?? 0,
-                'needs_human_check' => $field['needs_human_check'] ?? true,
-                'include_default' => $field['include_default'] ?? false,
-                'output_candidate' => $field['output_candidate'] ?? true,
-                'reason' => $field['reason'] ?? '',
-            ]);
-            $normalized['ai_value'] = (string)($field['ai_value'] ?? $normalized['value']);
-            $normalized['ui_template'] = in_array((string)($field['ui_template'] ?? 'input'), ['input','textarea','date','number','checkbox','select'], true) ? (string)$field['ui_template'] : 'input';
-            $normalized['display_order'] = is_numeric($field['display_order'] ?? null) ? (int)$field['display_order'] : ($i + 1);
-            $normalized['is_empty_cell'] = !empty($field['is_empty_cell']);
-            $normalized['source'] = 'ai_rule_mapping';
-            $fields[] = $normalized;
-        }
-        $mapping['display_fields'] = $fields;
-        $mapping['medications'] = self::normalizeMedications(is_array($mapping['medications'] ?? null) ? $mapping['medications'] : []);
-        $mapping['warnings'] = array_values(array_unique(array_filter(array_map('strval', (array)($mapping['warnings'] ?? [])))));
-        return $mapping;
     }
 
     public static function normalize(array $value): array

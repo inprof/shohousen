@@ -24,11 +24,15 @@ final class PrescriptionOcrService
         private readonly PrescriptionAiRuleMapperService $aiRuleMapper = new PrescriptionAiRuleMapperService(),
     ) {}
 
-    public function analyzeUploaded(array $file, array $user, string $sourceType): int
+    public function analyzeUploaded(array $file, array $user, string $sourceType, ?string $modelTier = null): int
     {
         $tenantId = (int)$user['tenant_id'];
         $companyUid = current_company_uid();
         $branchUid = current_branch_uid();
+        $modelTier = OpenAiPrescriptionClient::normalizeModelTier($modelTier);
+        $modelSummary = OpenAiPrescriptionClient::modelTierSummary($modelTier);
+        $modelSummaryText = $modelSummary['summary'];
+        $openaiClient = $this->openai->withModelTier($modelTier);
         $start = microtime(true);
         $preprocessStart = microtime(true);
         $stored = $this->image->storeUploadedFile($file, $user);
@@ -56,7 +60,7 @@ final class PrescriptionOcrService
             ':tenant_id' => $tenantId,
             ':source_type' => in_array($sourceType, ['camera', 'file'], true) ? $sourceType : 'file',
             ':storage_file_id' => $stored['storage_file_id'],
-            ':model_name' => (string)app_config('openai.model', 'gpt-4o-mini'),
+            ':model_name' => $modelSummaryText,
             ':prompt_version' => 'prescription_extract_v1',
             ':schema_version' => 'prescription_schema_v1',
             ':created_by' => (int)$user['id'],
@@ -119,16 +123,42 @@ final class PrescriptionOcrService
         $openaiStart = microtime(true);
         try {
             $pdo->prepare('UPDATE prescription_parse_jobs SET status = "analyzing" WHERE id = :id')->execute([':id' => $jobId]);
-            $ai = $this->openai->extractFromImage($ocrStored['path'], $ocrStored['mime_type'], $template);
+            $ai = $openaiClient->extractFromImage($ocrStored['path'], $ocrStored['mime_type'], $template);
             $openaiMs = self::elapsedMs($openaiStart);
             $debug = new PrescriptionIoDebugService();
-            $debug->saveSnapshot($tenantId, $jobId, null, 'openai_raw_response', '読み込み直後: OpenAI生レスポンス', $ai['raw'], [
+
+            $debug->saveSnapshot($tenantId, $jobId, null, 'ocr_raw_text', '1. OCR生テキスト: 画像から起こした文字', (string)($ai['ocr_raw_text'] ?? ''), [
+                'model_name' => (string)($ai['models']['ocr'] ?? $ai['model']),
+                'content_type' => 'text',
+                'created_by_user_id' => (int)$user['id'],
+            ]);
+            $debug->saveSnapshot($tenantId, $jobId, null, 'ocr_structured_json', '2. OCR構造JSON: 行・ブロック・信頼度', $ai['ocr_structured_json'] ?? [], [
+                'model_name' => (string)($ai['models']['ocr'] ?? $ai['model']),
+                'created_by_user_id' => (int)$user['id'],
+            ]);
+            $debug->saveSnapshot($tenantId, $jobId, null, 'prescription_item_json', '3. 処方箋項目JSON: OCRから患者・保険・薬品へ項目分け', $ai['prescription_item_json'] ?? $ai['normalized'], [
+                'model_name' => (string)($ai['models']['structure'] ?? $ai['model']),
+                'created_by_user_id' => (int)$user['id'],
+            ]);
+            $debug->saveSnapshot($tenantId, $jobId, null, 'openai_raw_response', 'OpenAI生レスポンス: 4段階パイプライン全体', $ai['raw'], [
                 'model_name' => $ai['model'],
                 'created_by_user_id' => (int)$user['id'],
             ]);
-            $debug->saveSnapshot($tenantId, $jobId, null, 'openai_normalized', '読み込み直後: AI正規化JSON', $ai['normalized'], [
+            $debug->saveSnapshot($tenantId, $jobId, null, 'openai_normalized', '処方箋項目JSON正規化後: PHP通常化適用前後確認用', $ai['normalized'], [
                 'model_name' => $ai['model'],
                 'created_by_user_id' => (int)$user['id'],
+            ]);
+            $this->knowledge->savePipelineTrace($tenantId, $jobId, null, 'ocr_raw_text', 'read', ['raw_text' => (string)($ai['ocr_raw_text'] ?? '')], [
+                'model_name' => (string)($ai['models']['ocr'] ?? $ai['model']),
+                'layout_fingerprint' => $layoutFingerprint,
+            ]);
+            $this->knowledge->savePipelineTrace($tenantId, $jobId, null, 'ocr_structured_json', 'read', $ai['ocr_structured_json'] ?? [], [
+                'model_name' => (string)($ai['models']['ocr'] ?? $ai['model']),
+                'layout_fingerprint' => $layoutFingerprint,
+            ]);
+            $this->knowledge->savePipelineTrace($tenantId, $jobId, null, 'prescription_item_json', 'read', $ai['prescription_item_json'] ?? $ai['normalized'], [
+                'model_name' => (string)($ai['models']['structure'] ?? $ai['model']),
+                'layout_fingerprint' => $layoutFingerprint,
             ]);
             $this->knowledge->savePipelineTrace($tenantId, $jobId, null, 'openai_normalized', 'read', $ai['normalized'], [
                 'model_name' => $ai['model'],
@@ -142,7 +172,7 @@ final class PrescriptionOcrService
             ]);
 
             $mappingStart = microtime(true);
-            $mappingResult = $this->aiRuleMapper->mapForDisplay($normalizedAfterCorrection, $template, $detectedTemplateMeta, $jobId, $tenantId);
+            $mappingResult = $this->aiRuleMapper->mapForDisplay($normalizedAfterCorrection, $template, $detectedTemplateMeta, $jobId, $tenantId, $modelTier);
             $mappingMs = self::elapsedMs($mappingStart);
             $normalized = $mappingResult['normalized'];
             $debug->saveSnapshot($tenantId, $jobId, null, 'ai_rule_mapped_display', 'AI項目化後: ルール・表示フォーム用JSON', [
@@ -151,12 +181,25 @@ final class PrescriptionOcrService
                 'mapping' => $mappingResult['mapping'],
                 'normalized' => $normalized,
             ], [
-                'model_name' => $ai['model'],
+                'model_name' => (string)($ai['models']['mapping'] ?? $ai['model']),
+                'model_tier' => $modelSummary,
+                'created_by_user_id' => (int)$user['id'],
+                'mapping_ms' => $mappingMs,
+            ]);
+            $debug->saveSnapshot($tenantId, $jobId, null, 'display_output_data', '4. 表示・出力用データ: 画面フォーム・QR出力前の項目書き出し', [
+                'used_ai' => $mappingResult['used_ai'],
+                'error' => $mappingResult['error'],
+                'mapping' => $mappingResult['mapping'],
+                'normalized' => $normalized,
+            ], [
+                'model_name' => (string)($ai['models']['mapping'] ?? $ai['model']),
+                'model_tier' => $modelSummary,
                 'created_by_user_id' => (int)$user['id'],
                 'mapping_ms' => $mappingMs,
             ]);
             $this->knowledge->savePipelineTrace($tenantId, $jobId, null, 'ai_rule_mapped_display', 'read', $normalized, [
-                'model_name' => $ai['model'],
+                'model_name' => (string)($ai['models']['mapping'] ?? $ai['model']),
+                'model_tier' => $modelSummary,
                 'layout_fingerprint' => $layoutFingerprint,
                 'mapping_ms' => $mappingMs,
                 'used_ai' => $mappingResult['used_ai'],
@@ -173,7 +216,7 @@ final class PrescriptionOcrService
                     overall_confidence = :confidence, matched_template_id = :matched_template_id, analyzed_at = NOW(), updated_at = NOW()
                 WHERE id = :id');
             $stmt->execute([
-                ':model_name' => $ai['model'],
+                ':model_name' => $modelSummaryText,
                 ':raw' => json_encode($ai['raw'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ':normalized' => json_encode($normalized, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
                 ':confidence' => (float)($normalized['overall_confidence'] ?? 0),
@@ -189,18 +232,20 @@ final class PrescriptionOcrService
                 'total_ms' => self::elapsedMs($start),
                 'image_bytes_before' => $stored['size'],
                 'image_bytes_after' => $ocrStored['size'],
-                'openai_model' => $ai['model'],
+                'openai_model' => $modelSummaryText,
                 'image_detail' => (string)app_config('openai.vision_detail', 'high'),
             ]);
         } catch (Throwable $e) {
             if ($e instanceof OpenAiPrescriptionJsonParseException) {
                 $debug = new PrescriptionIoDebugService();
                 $debug->saveSnapshot($tenantId, $jobId, null, 'openai_raw_response_failed', '失敗時: OpenAI生レスポンス', $e->rawResponse(), [
-                    'model_name' => (string)app_config('openai.model', 'gpt-4o-mini'),
+                    'model_name' => $modelSummaryText,
+                    'model_tier' => $modelSummary,
                     'created_by_user_id' => (int)$user['id'],
                 ]);
                 $debug->saveSnapshot($tenantId, $jobId, null, 'openai_output_text_failed', '失敗時: output_text（JSON解析失敗）', $e->outputText(), [
-                    'model_name' => (string)app_config('openai.model', 'gpt-4o-mini'),
+                    'model_name' => $modelSummaryText,
+                    'model_tier' => $modelSummary,
                     'content_type' => 'text',
                     'created_by_user_id' => (int)$user['id'],
                 ]);
@@ -214,7 +259,8 @@ final class PrescriptionOcrService
                         'モデル側のrefusalまたはincomplete',
                     ],
                 ], [
-                    'model_name' => (string)app_config('openai.model', 'gpt-4o-mini'),
+                    'model_name' => $modelSummaryText,
+                    'model_tier' => $modelSummary,
                     'created_by_user_id' => (int)$user['id'],
                 ]);
                 $pdo->prepare('UPDATE prescription_parse_jobs SET raw_response_json = :raw WHERE id = :id')
@@ -233,7 +279,7 @@ final class PrescriptionOcrService
                 'total_ms' => self::elapsedMs($start),
                 'image_bytes_before' => $stored['size'],
                 'image_bytes_after' => $ocrStored['size'],
-                'openai_model' => (string)app_config('openai.model', 'gpt-4o-mini'),
+                'openai_model' => $modelSummaryText,
                 'image_detail' => (string)app_config('openai.vision_detail', 'high'),
             ]);
             throw new PrescriptionOcrAnalyzeException($e->getMessage(), $jobId, 0, $e);

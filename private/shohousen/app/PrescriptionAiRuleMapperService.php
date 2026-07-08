@@ -24,7 +24,7 @@ final class PrescriptionAiRuleMapperService
      * @param array<string,mixed> $layoutMeta
      * @return array{normalized:array<string,mixed>,mapping:array<string,mixed>,used_ai:bool,error:?string}
      */
-    public function mapForDisplay(array $normalized, ?array $template, array $layoutMeta = [], ?int $parseJobId = null, int $tenantId = 0): array
+    public function mapForDisplay(array $normalized, ?array $template, array $layoutMeta = [], ?int $parseJobId = null, int $tenantId = 0, ?string $modelTier = null): array
     {
         $base = $this->ensureDisplayReadyFields($normalized, null);
         $enabled = (bool)app_config('prescription_ai_mapping.enabled', true);
@@ -39,12 +39,13 @@ final class PrescriptionAiRuleMapperService
 
         try {
             $ruleContext = $this->ruleContext($base, $layoutMeta, $parseJobId, $tenantId);
-            $mapping = $this->openai->mapNormalizedToDisplay($base, $template, $ruleContext);
+            $mapping = $this->openai->withModelTier($modelTier)->mapNormalizedToDisplay($base, $template, $ruleContext);
             $mapped = $this->applyAiMapping($base, $mapping);
             $mapped['_ai_rule_mapping'] = [
                 'enabled' => true,
                 'used_ai' => true,
                 'mapper_model' => (string)($mapping['model'] ?? app_config('openai.model', 'gpt-4o-mini')),
+                'model_tier' => OpenAiPrescriptionClient::modelTierSummary($modelTier),
                 'warnings' => array_values(array_filter(array_map('strval', (array)($mapping['warnings'] ?? [])))),
                 'generated_at' => date('c'),
             ];

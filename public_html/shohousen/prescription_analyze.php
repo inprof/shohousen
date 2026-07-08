@@ -10,7 +10,8 @@ try {
     if (!is_array($file)) {
         throw new RuntimeException('処方箋画像が選択されていません。');
     }
-    $jobId = (new PrescriptionOcrService())->analyzeUploaded($file, $user, (string)($_POST['source_type'] ?? 'camera'));
+    $modelTier = OpenAiPrescriptionClient::normalizeModelTier((string)($_POST['model_tier'] ?? 'high'));
+    $jobId = (new PrescriptionOcrService())->analyzeUploaded($file, $user, (string)($_POST['source_type'] ?? 'camera'), $modelTier);
     redirect('/prescription_result.php?job_id=' . $jobId);
 } catch (Throwable $e) {
     $failedJobId = $e instanceof PrescriptionOcrAnalyzeException ? $e->jobId : 0;

@@ -1,6 +1,8 @@
 <?php
 require_once dirname(__DIR__, 2) . '/private/shohousen/app/bootstrap.php';
 $user = Auth::requireBranchSelected();
+$modelTierOptions = OpenAiPrescriptionClient::modelTierOptions();
+$defaultModelTier = OpenAiPrescriptionClient::normalizeModelTier((string)app_config('openai.default_model_tier', 'high'));
 View::header('処方箋読込');
 ?>
 <link rel="stylesheet" href="<?= h(app_url('/assets/css/prescription_scan.css')) ?>">
@@ -22,6 +24,18 @@ View::header('処方箋読込');
         <li>暗い場所、斜め撮影、ピンぼけは解析精度が落ちます。</li>
         <li>AI解析後、人間確認・修正してからQR化します。</li>
       </ul>
+      <div class="model-tier-select" style="margin:16px 0;padding:12px;border:1px solid #d8dee8;border-radius:10px;background:#f8fafc;">
+        <label for="modelTier" style="display:block;font-weight:700;margin-bottom:6px;">解析モデル</label>
+        <select name="model_tier" id="modelTier" style="width:100%;max-width:520px;padding:10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;">
+          <?php foreach ($modelTierOptions as $tierKey => $tier): ?>
+            <option value="<?= h((string)$tierKey) ?>" <?= $tierKey === $defaultModelTier ? 'selected' : '' ?>>
+              <?= h((string)$tier['label']) ?>：OCR <?= h((string)$tier['ocr_model']) ?> / 項目化 <?= h((string)$tier['structure_model']) ?> / 書き出し <?= h((string)$tier['mapping_model']) ?>
+            </option>
+          <?php endforeach; ?>
+        </select>
+        <p class="hint left" id="modelTierHint" style="margin-top:8px;">高精度は精度優先、中価格はバランス、低価格はコスト優先です。選択したモデル構成は読み取りジョブとIO診断に保存されます。</p>
+      </div>
+
       <div class="capture-actions" aria-label="処方箋画像の取り込み方法">
         <input class="native-hidden-file-input" type="file" name="prescription_file" id="prescriptionFile" accept="image/*" capture="environment" required>
         <input class="native-hidden-file-input" type="file" id="prescriptionFilePicker" accept="image/jpeg,image/png,image/webp,image/*">
