@@ -100,6 +100,13 @@ View::header('確定保存完了');
   <div class="button-row end sticky-save-actions">
     <a class="btn ghost" href="<?= h(app_url('/reception_detail.php?id=' . (string)$id)) ?>">保存内容を詳細確認</a>
     <a class="btn ghost" href="<?= h(app_url('/prescription_io_debug.php?id=' . (string)$id)) ?>">IO診断を見る</a>
+    <?php if (!empty($prescription['parse_job_id'])): ?>
+      <form method="post" action="<?= h(app_url('/prescription_reparse_test.php')) ?>" class="inline-form" style="display:inline-flex;margin:0">
+        <?= Csrf::field() ?>
+        <input type="hidden" name="id" value="<?= h((string)$id) ?>">
+        <button class="btn ghost" type="submit">保存済みデータで再解析テスト</button>
+      </form>
+    <?php endif; ?>
     <a class="btn primary" href="<?= h(app_url('/qr.php?id=' . (string)$id)) ?>">QR作成へ進む</a>
   </div>
 </section>

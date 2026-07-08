@@ -8,6 +8,16 @@ Csrf::verify();
 
 try {
     $prescriptionId = create_prescription_from_post($user, $_POST);
+    $afterSaveAction = (string)($_POST['after_save_action'] ?? 'normal');
+    if ($afterSaveAction === 'reparse_test') {
+        try {
+            (new PrescriptionReparseTestService())->runForPrescription($user, $prescriptionId);
+            redirect('/prescription_io_debug.php?id=' . $prescriptionId . '&reparse_done=1');
+        } catch (Throwable $reparseError) {
+            $_SESSION['prescription_reparse_error'] = $reparseError->getMessage();
+            redirect('/prescription_io_debug.php?id=' . $prescriptionId . '&reparse_error=1');
+        }
+    }
     redirect('/prescription_field_select.php?id=' . $prescriptionId . '&saved=1');
 } catch (Throwable $e) {
     http_response_code(500);

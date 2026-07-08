@@ -80,11 +80,19 @@ usort($snapshots, static function (array $a, array $b): int {
         'openai_raw_response' => 10,
         'openai_normalized' => 20,
         'normalized_after_correction' => 30,
+        'ai_rule_mapped_display' => 35,
         'confirmed_post' => 40,
+        'human_corrected_answer' => 42,
+        'learning_saved_summary' => 44,
         'db_saved_prescription' => 50,
         'db_saved_prescription_current' => 55,
-        'qr_payload' => 60,
-        'qr_payload_current' => 65,
+        'ai_reparse_after_learning_raw' => 70,
+        'ai_reparse_after_learning_normalized' => 72,
+        'ai_reparse_after_learning_php_validated' => 74,
+        'ai_reparse_after_learning_mapped_display' => 76,
+        'reparse_compare_result' => 80,
+        'qr_payload' => 90,
+        'qr_payload_current' => 95,
     ];
     $ao = $order[(string)($a['stage'] ?? '')] ?? 99;
     $bo = $order[(string)($b['stage'] ?? '')] ?? 99;
@@ -110,7 +118,10 @@ function io_debug_snapshot_body(array $row): string
 
 function io_debug_stage_class(string $stage): string
 {
-    if (str_contains($stage, 'openai') || str_contains($stage, 'normalized')) {
+    if (str_contains($stage, 'reparse') || str_contains($stage, 'human_corrected') || str_contains($stage, 'learning_saved')) {
+        return 'learn';
+    }
+    if (str_contains($stage, 'openai') || str_contains($stage, 'normalized') || str_contains($stage, 'ai_rule')) {
         return 'read';
     }
     if (str_contains($stage, 'qr')) {
@@ -119,12 +130,24 @@ function io_debug_stage_class(string $stage): string
     return 'save';
 }
 
+$reparseError = '';
+if (!empty($_SESSION['prescription_reparse_error'])) {
+    $reparseError = (string)$_SESSION['prescription_reparse_error'];
+    unset($_SESSION['prescription_reparse_error']);
+}
+
 View::header('処方箋IO診断');
 ?>
 <section class="page-title">
   <h1>処方箋IO診断</h1>
-  <p>読み込み直後・人間修正後・DB保存後・書き出し後を同じ画面で確認します。モデル精度の問題か、保存/QR変換側の問題かを切り分けるための画面です。</p>
+  <p>読み込み直後・AI項目化後・人間修正後・補助学習後の再解析・DB保存後・書き出し後を同じ画面で確認します。</p>
 </section>
+<?php if (isset($_GET['reparse_done'])): ?>
+  <div class="alert success"><strong>再解析テスト完了</strong><br>人間修正後データを正解として、同じ画像を再解析した比較結果を保存しました。</div>
+<?php endif; ?>
+<?php if ($reparseError !== ''): ?>
+  <div class="alert danger"><strong>再解析テスト失敗</strong><br><?= h($reparseError) ?></div>
+<?php endif; ?>
 
 <section class="card">
   <h2>対象</h2>
@@ -140,6 +163,13 @@ View::header('処方箋IO診断');
     <?php endif; ?>
     <?php if ($prescriptionId > 0): ?>
       <a class="btn ghost" href="<?= h(app_url('/prescription_saved.php?id=' . (string)$prescriptionId)) ?>">保存内容へ戻る</a>
+      <?php if ($jobId > 0): ?>
+        <form method="post" action="<?= h(app_url('/prescription_reparse_test.php')) ?>" class="inline-form" style="display:inline-flex;margin:0">
+          <?= Csrf::field() ?>
+          <input type="hidden" name="id" value="<?= h((string)$prescriptionId) ?>">
+          <button class="btn ghost" type="submit">再解析テストを実行</button>
+        </form>
+      <?php endif; ?>
       <a class="btn ghost" href="<?= h(app_url('/qr.php?id=' . (string)$prescriptionId)) ?>">QR画面へ</a>
     <?php elseif ($jobId > 0): ?>
       <a class="btn ghost" href="<?= h(app_url('/prescription_result.php?job_id=' . (string)$jobId)) ?>">読み取り結果へ戻る</a>
@@ -150,8 +180,10 @@ View::header('処方箋IO診断');
 <section class="card">
   <h2>確認ポイント</h2>
   <div class="rule-check-list compact">
-    <article class="rule-check-item info"><strong>読み込み後JSONが間違い</strong><p>画像認識・プロンプト・モデル・前処理・テンプレート判定側の問題です。</p></article>
-    <article class="rule-check-item warning"><strong>読み込み後JSONは正しいがDB保存後が違う</strong><p>確認画面POST、正規化、DB保存処理、薬品計算ロジック側の問題です。</p></article>
+    <article class="rule-check-item info"><strong>AI正規化JSONが間違い</strong><p>画像認識・プロンプト・モデル・前処理・テンプレート判定側の問題です。</p></article>
+    <article class="rule-check-item warning"><strong>AI正規化JSONは正しいがAI項目化後に違う</strong><p>表示フォーム用の項目配置・拠点テンプレート解釈・ルール配置側の問題です。</p></article>
+    <article class="rule-check-item warning"><strong>人間修正後は正しいがDB保存後が違う</strong><p>確認画面POST、正規化、DB保存処理、薬品計算ロジック側の問題です。</p></article>
+    <article class="rule-check-item info"><strong>再解析比較の一致率が低い</strong><p>補助学習DBのヒントがまだ不足しているか、レイアウト/薬品/項目単位の学習ルールが効いていない状態です。</p></article>
     <article class="rule-check-item danger"><strong>DB保存後は正しいがQR中間データが違う</strong><p>JAHIS/QRマッピング、使用項目選択、書き出し処理側の問題です。</p></article>
   </div>
 </section>
@@ -188,6 +220,8 @@ View::header('処方箋IO診断');
 .io-debug-snapshot.read { border-left: 6px solid #4b7bec; }
 .io-debug-snapshot.save { border-left: 6px solid #f7b731; }
 .io-debug-snapshot.write { border-left: 6px solid #eb3b5a; }
+.io-debug-snapshot.learn { border-left: 6px solid #20bf6b; }
+.inline-form { display: inline-flex; margin: 0; }
 .muted { opacity: .7; font-size: 12px; }
 </style>
 <?php View::footer(); ?>

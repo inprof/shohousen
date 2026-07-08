@@ -652,14 +652,30 @@ function create_prescription_from_post(array $user, array $post): int
         // 使用項目の選択は拠点ごとの運用設定なので、補助学習スコアには使わない。
         try {
             $knowledge = new PrescriptionKnowledgeService();
+            $correctionRows = correction_learning_rows_from_selected_fields($selectedFields);
             if ($selectedFields) {
-                $knowledge->saveConfirmedCorrectionLearning($parseJobId, $tenantId, correction_learning_rows_from_selected_fields($selectedFields));
+                $knowledge->saveConfirmedCorrectionLearning($parseJobId, $tenantId, $correctionRows);
                 $knowledge->saveLayoutFieldLearning($parseJobId, $tenantId, $selectedFields);
             }
             $drugLearningRows = medication_name_learning_rows_from_post($post);
             if ($drugLearningRows) {
                 $knowledge->saveDrugNameLearningEvents($parseJobId, $tenantId, $prescriptionId, $drugLearningRows);
             }
+            $learningSummary = [
+                'parse_job_id' => $parseJobId,
+                'prescription_id' => $prescriptionId,
+                'field_learning_rows' => count($correctionRows),
+                'selected_field_rows' => count($selectedFields),
+                'drug_learning_rows' => count($drugLearningRows),
+                'score_basis' => 'AI値と人間修正後の確定値を比較し、人間修正後を正解として補助学習DBに保存',
+                'saved_at' => date('c'),
+            ];
+            $ioDebug->saveSnapshot($tenantId, $parseJobId, $prescriptionId, 'learning_saved_summary', '補助学習保存後: スコア化対象サマリー', $learningSummary, [
+                'created_by_user_id' => (int)$user['id'],
+            ]);
+            $knowledge->savePipelineTrace($tenantId, $parseJobId ?? 0, $prescriptionId, 'learning_saved_summary', 'learning', $learningSummary, [
+                'created_by_user_id' => (int)$user['id'],
+            ]);
         } catch (Throwable) {
             // 補助学習DBの一時不調で拠点DBへの確定保存を止めない。
         }

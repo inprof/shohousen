@@ -383,6 +383,211 @@ PROMPT;
         ];
     }
 
+
+    /**
+     * @param array<string,mixed> $normalized
+     * @return array<string,mixed>
+     */
+    private static function demoDisplayMapping(array $normalized): array
+    {
+        return [
+            'fixed' => [
+                'patient' => $normalized['patient'] ?? [],
+                'insurance' => $normalized['insurance'] ?? [],
+                'prescription' => $normalized['prescription'] ?? [],
+                'medical_institution' => $normalized['medical_institution'] ?? [],
+            ],
+            'display_fields' => is_array($normalized['form_fields'] ?? null) ? $normalized['form_fields'] : [],
+            'medications' => is_array($normalized['medications'] ?? null) ? $normalized['medications'] : [],
+            'warnings' => ['demo display mapping'],
+            'model' => 'demo',
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    public static function displayMappingSchema(): array
+    {
+        $displayFieldSchema = [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => [
+                'field_key',
+                'field_label',
+                'field_group',
+                'value',
+                'ai_value',
+                'value_type',
+                'ui_template',
+                'source_section',
+                'confidence',
+                'needs_human_check',
+                'include_default',
+                'output_candidate',
+                'display_order',
+                'is_empty_cell',
+                'reason'
+            ],
+            'properties' => [
+                'field_key' => ['type' => 'string'],
+                'field_label' => ['type' => 'string'],
+                'field_group' => ['type' => 'string', 'enum' => ['patient', 'insurance', 'public_expense', 'prescription', 'medical_institution', 'medication', 'pharmacy', 'note', 'qr', 'other']],
+                'value' => ['type' => 'string'],
+                'ai_value' => ['type' => 'string'],
+                'value_type' => ['type' => 'string', 'enum' => ['text', 'date', 'number', 'code', 'person_name', 'drug', 'usage', 'amount', 'boolean', 'unknown']],
+                'ui_template' => ['type' => 'string', 'enum' => ['input', 'textarea', 'date', 'number', 'checkbox', 'select']],
+                'source_section' => ['type' => 'string'],
+                'confidence' => ['type' => 'number'],
+                'needs_human_check' => ['type' => 'boolean'],
+                'include_default' => ['type' => 'boolean'],
+                'output_candidate' => ['type' => 'boolean'],
+                'display_order' => ['type' => 'integer'],
+                'is_empty_cell' => ['type' => 'boolean'],
+                'reason' => ['type' => 'string'],
+            ],
+        ];
+
+        $medicationSchema = [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => ['drug_name', 'generic_name', 'brand_name', 'raw_drug_text', 'name_relation', 'dose_text', 'usage_text', 'days_count', 'amount_text', 'confidence', 'needs_human_check', 'reason'],
+            'properties' => [
+                'drug_name' => ['type' => 'string'],
+                'generic_name' => ['type' => 'string'],
+                'brand_name' => ['type' => 'string'],
+                'raw_drug_text' => ['type' => 'string'],
+                'name_relation' => ['type' => 'string', 'enum' => ['single', 'generic_brand_pair', 'multiple_candidates', 'unknown']],
+                'dose_text' => ['type' => 'string'],
+                'usage_text' => ['type' => 'string'],
+                'days_count' => ['type' => ['integer', 'null']],
+                'amount_text' => ['type' => 'string'],
+                'confidence' => ['type' => 'number'],
+                'needs_human_check' => ['type' => 'boolean'],
+                'reason' => ['type' => 'string'],
+            ],
+        ];
+
+        return [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => ['fixed', 'display_fields', 'medications', 'warnings'],
+            'properties' => [
+                'fixed' => [
+                    'type' => 'object',
+                    'additionalProperties' => false,
+                    'required' => ['patient', 'insurance', 'prescription', 'medical_institution'],
+                    'properties' => [
+                        'patient' => [
+                            'type' => 'object',
+                            'additionalProperties' => false,
+                            'required' => ['name', 'kana', 'birth_date', 'gender'],
+                            'properties' => [
+                                'name' => ['type' => 'string'],
+                                'kana' => ['type' => 'string'],
+                                'birth_date' => ['type' => 'string'],
+                                'gender' => ['type' => 'string'],
+                            ],
+                        ],
+                        'insurance' => [
+                            'type' => 'object',
+                            'additionalProperties' => false,
+                            'required' => ['insurance_no', 'insured_symbol_number', 'copay_rate'],
+                            'properties' => [
+                                'insurance_no' => ['type' => 'string'],
+                                'insured_symbol_number' => ['type' => 'string'],
+                                'copay_rate' => ['type' => 'string'],
+                            ],
+                        ],
+                        'prescription' => [
+                            'type' => 'object',
+                            'additionalProperties' => false,
+                            'required' => ['issued_on', 'expires_on'],
+                            'properties' => [
+                                'issued_on' => ['type' => 'string'],
+                                'expires_on' => ['type' => 'string'],
+                            ],
+                        ],
+                        'medical_institution' => [
+                            'type' => 'object',
+                            'additionalProperties' => false,
+                            'required' => ['code', 'name', 'doctor_name', 'phone'],
+                            'properties' => [
+                                'code' => ['type' => 'string'],
+                                'name' => ['type' => 'string'],
+                                'doctor_name' => ['type' => 'string'],
+                                'phone' => ['type' => 'string'],
+                            ],
+                        ],
+                    ],
+                ],
+                'display_fields' => ['type' => 'array', 'items' => $displayFieldSchema],
+                'medications' => ['type' => 'array', 'items' => $medicationSchema],
+                'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
+            ],
+        ];
+    }
+
+    /** @param array<string,mixed>|null $templateHint @param array<string,mixed> $ruleContext */
+    private static function displayMappingPrompt(?array $templateHint, array $ruleContext = []): string
+    {
+        $template = $templateHint ? json_encode($templateHint, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : '{}';
+        $context = $ruleContext ? json_encode($ruleContext, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) : '{}';
+        return <<<PROMPT
+あなたは日本の薬局向け処方箋OCRの表示項目マッピングエンジンです。
+入力は、すでに画像から読み取られた処方箋JSONです。画像の再読取はしません。
+目的は、処方箋ルール、拠点テンプレート、過去の人間修正傾向に沿って、確認画面のフォームへ流し込める display_fields を作ることです。
+固定項目に入る患者・保険・交付日・医療機関は fixed にも反映してください。
+薬品名・用量・用法・日数・総量は medications に集約し、display_fields へ重複して出さないでください。
+画像上に書かれていない一般名候補・商品名候補・辞書候補は、確定項目として増やさないでください。
+保険者番号は6桁または8桁、公費負担者番号は8桁、公費受給者番号は7桁、医療機関コードは通常7桁です。形式が怪しい値はneeds_human_check=trueにしてください。
+AIが自信を持てないもの、補助学習で修正率が高い項目、空欄か値ありか不明な項目はneeds_human_check=trueにしてください。
+ui_template は、日付ならdate、長文ならtextarea、真偽値ならcheckbox、それ以外はinputを基本にしてください。
+出力は必ず指定JSON Schemaだけで返し、余計な文章は含めないでください。
+既知テンプレート: {$template}
+ルール/学習コンテキスト: {$context}
+PROMPT;
+    }
+
+    /** @param array<string,mixed> $mapping @return array<string,mixed> */
+    private static function normalizeDisplayMapping(array $mapping): array
+    {
+        $mapping['fixed'] = is_array($mapping['fixed'] ?? null) ? $mapping['fixed'] : [];
+        foreach (['patient', 'insurance', 'prescription', 'medical_institution'] as $section) {
+            if (!is_array($mapping['fixed'][$section] ?? null)) {
+                $mapping['fixed'][$section] = [];
+            }
+        }
+
+        $fields = [];
+        foreach (($mapping['display_fields'] ?? []) as $i => $field) {
+            if (!is_array($field)) {
+                continue;
+            }
+            $normalized = self::normalizeFormField([
+                'field_key' => $field['field_key'] ?? '',
+                'field_label' => $field['field_label'] ?? '',
+                'field_group' => $field['field_group'] ?? 'other',
+                'value' => $field['value'] ?? '',
+                'value_type' => $field['value_type'] ?? 'text',
+                'source_section' => $field['source_section'] ?? '',
+                'confidence' => $field['confidence'] ?? 0,
+                'needs_human_check' => $field['needs_human_check'] ?? true,
+                'include_default' => $field['include_default'] ?? false,
+                'output_candidate' => $field['output_candidate'] ?? true,
+                'reason' => $field['reason'] ?? '',
+            ]);
+            $normalized['ai_value'] = (string)($field['ai_value'] ?? $normalized['value']);
+            $normalized['ui_template'] = in_array((string)($field['ui_template'] ?? 'input'), ['input','textarea','date','number','checkbox','select'], true) ? (string)$field['ui_template'] : 'input';
+            $normalized['display_order'] = is_numeric($field['display_order'] ?? null) ? (int)$field['display_order'] : ($i + 1);
+            $normalized['is_empty_cell'] = !empty($field['is_empty_cell']);
+            $normalized['source'] = 'ai_rule_mapping';
+            $fields[] = $normalized;
+        }
+        $mapping['display_fields'] = $fields;
+        $mapping['medications'] = self::normalizeMedications(is_array($mapping['medications'] ?? null) ? $mapping['medications'] : []);
+        $mapping['warnings'] = array_values(array_unique(array_filter(array_map('strval', (array)($mapping['warnings'] ?? [])))));
+        return $mapping;
+    }
+
     public static function normalize(array $value): array
     {
         $normalized = array_replace_recursive(self::blankNormalized(), $value);

@@ -366,9 +366,9 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
 
   <div class="confirm-flow-note">
     <span class="flow-step active">1. 読み取り項目を修正</span>
-    <span class="flow-step">2. DB保存</span>
-    <span class="flow-step">3. 使用項目を選択</span>
-    <span class="flow-step">4. QR作成</span>
+    <span class="flow-step">2. DB保存・補助学習</span>
+    <span class="flow-step">3. 必要時だけ再解析テスト</span>
+    <span class="flow-step">4. 使用項目選択・QR作成</span>
   </div>
 
   <?php if ($ruleChecks): ?>
@@ -628,7 +628,10 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   <div class="button-row end sticky-save-actions">
     <a class="btn ghost" href="<?= h(app_url('/prescription_scan.php')) ?>">再撮影</a>
     <?php if ($jobId > 0): ?><a class="btn ghost" href="<?= h(app_url('/prescription_io_debug.php?job_id=' . (string)$jobId)) ?>">IO診断を見る</a><?php endif; ?>
-    <button class="btn primary" type="submit">修正内容をDB保存して次へ</button>
+    <?php if ($jobId > 0): ?>
+      <button class="btn ghost" type="submit" name="after_save_action" value="reparse_test">保存して再解析テスト</button>
+    <?php endif; ?>
+    <button class="btn primary" type="submit" name="after_save_action" value="normal">修正内容をDB保存して次へ</button>
   </div>
 </form>
 <script>

@@ -88,6 +88,7 @@ require_once __DIR__ . '/PrescriptionIoDebugService.php';
 require_once __DIR__ . '/PrescriptionFeedbackService.php';
 require_once __DIR__ . '/PrescriptionRuleEngineService.php';
 require_once __DIR__ . '/PrescriptionQrService.php';
+require_once __DIR__ . '/PrescriptionReparseTestService.php';
 
 
 function current_company_uid(): string
