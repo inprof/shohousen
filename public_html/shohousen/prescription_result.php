@@ -16,11 +16,19 @@ if (!$job) {
 }
 
 $minimalAnalysisMode = (bool)app_config('prescription_minimal_analysis.enabled', true);
+$validationSummary = is_array($data['validation_summary'] ?? null) ? $data['validation_summary'] : [];
+$fieldValidations = is_array($data['field_validations'] ?? null) ? $data['field_validations'] : [];
+$ocrAttempts = is_array($data['_ocr_attempts'] ?? null) ? array_values($data['_ocr_attempts']) : [];
+$canRetryOcr = $jobId > 0 && !empty($data['_can_retry_ocr']);
+$retryDisabledReason = (string)($data['_ocr_retry_disabled_reason'] ?? '');
+$qrReady = !empty($data['qr_ready']) && (int)($validationSummary['blocks_qr'] ?? 0) === 0;
 $candidates = $minimalAnalysisMode ? [] : ($data['_correction_candidates'] ?? []);
 $patient = $data['patient'] ?? [];
 $insurance = $data['insurance'] ?? [];
 $prescription = $data['prescription'] ?? [];
 $medical = $data['medical_institution'] ?? [];
+$publicExpense = is_array($data['public_expense'] ?? null) ? $data['public_expense'] : [];
+$substitution = is_array($data['substitution'] ?? null) ? $data['substitution'] : [];
 $medications = is_array($data['medications'] ?? null) ? $data['medications'] : [];
 $dynamicFields = is_array($data['form_fields'] ?? null) ? $data['form_fields'] : [];
 $fieldPreferences = [];
@@ -269,16 +277,20 @@ $fixedDefinitions = [
     ['insurance.insurance_no', '保険者番号', 'insurance', $insurance['insurance_no'] ?? '', 'code', 'input', 40, $insurance['confidence'] ?? null],
     ['insurance.insured_symbol_number', '記号番号', 'insurance', $insurance['insured_symbol_number'] ?? '', 'code', 'input', 50, $insurance['confidence'] ?? null],
     ['insurance.copay_rate', '負担割合', 'insurance', $insurance['copay_rate'] ?? '', 'text', 'input', 60, $insurance['confidence'] ?? null],
-    ['prescription.issued_on', '処方箋発行日', 'prescription', $prescription['issued_on'] ?? '', 'date', 'date', 70, $prescription['confidence'] ?? null],
+    ['public_expense.payer_no', '公費負担者番号', 'public_expense', $publicExpense['payer_no'] ?? '', 'code', 'input', 62, $publicExpense['confidence'] ?? null],
+    ['public_expense.beneficiary_no', '公費負担医療の受給者番号', 'public_expense', $publicExpense['beneficiary_no'] ?? '', 'code', 'input', 64, $publicExpense['confidence'] ?? null],
+    ['prescription.issued_on', '交付年月日', 'prescription', $prescription['issued_on'] ?? '', 'date', 'date', 70, $prescription['confidence'] ?? null],
     ['prescription.expires_on', '処方箋使用期間', 'prescription', $prescription['expires_on'] ?? '', 'date', 'date', 75, $prescription['confidence'] ?? null],
     ['medical_institution.code', '医療機関コード', 'medical_institution', $medical['code'] ?? '', 'code', 'input', 80, $medical['confidence'] ?? null],
-    ['medical_institution.name', '医療機関名', 'medical_institution', $medical['name'] ?? '', 'text', 'input', 90, $medical['confidence'] ?? null],
+    ['medical_institution.name', '保険医療機関名', 'medical_institution', $medical['name'] ?? '', 'text', 'input', 90, $medical['confidence'] ?? null],
+    ['medical_institution.address', '保険医療機関所在地', 'medical_institution', $medical['address'] ?? '', 'text', 'input', 91, $medical['confidence'] ?? null],
+    ['medical_institution.phone', '電話番号', 'medical_institution', $medical['phone'] ?? '', 'text', 'input', 92, $medical['confidence'] ?? null],
+    ['medical_institution.doctor_name', '保険医氏名', 'medical_institution', $medical['doctor_name'] ?? '', 'person_name', 'input', 93, $medical['confidence'] ?? null],
+    ['substitution.change_disallowed', '変更不可', 'prescription', !empty($substitution['change_disallowed']) ? '有' : '', 'boolean', 'select', 94, $substitution['confidence'] ?? null],
+    ['substitution.doctor_signature_or_seal', '保険医署名・記名押印', 'prescription', !empty($substitution['doctor_signature_or_seal']) ? '有' : '', 'boolean', 'select', 95, $substitution['confidence'] ?? null],
 ];
 foreach ($fixedDefinitions as [$key, $label, $group, $value, $valueType, $uiTemplate, $order, $confidence]) {
     $value = ocr_string($value);
-    if ($value === '') {
-        continue;
-    }
     upsert_review_field($reviewRowsByKey, [
         'field_key' => $key,
         'field_label' => $label,
@@ -287,8 +299,8 @@ foreach ($fixedDefinitions as [$key, $label, $group, $value, $valueType, $uiTemp
         'ai_value' => $value,
         'source_section' => '標準項目',
         'confidence' => $confidence,
-        'needs_human_check' => false,
-        'include_default' => true,
+        'needs_human_check' => $value === '',
+        'include_default' => $value !== '',
         'ui_template' => $uiTemplate,
         'value_type' => $valueType,
         'display_order' => $order,
@@ -325,10 +337,17 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   <h1>解析結果確認</h1>
   <p>AIが読み取った項目を一覧で表示しています。ここでは使う/使わないは選ばず、値の修正と不足項目の追加だけを行います。</p>
 </section>
+<?php if (!empty($_SESSION['prescription_retry_error'])): ?>
+  <div class="alert danger"><strong>再読み込みエラー</strong><br><?= h((string)$_SESSION['prescription_retry_error']) ?></div>
+  <?php unset($_SESSION['prescription_retry_error']); ?>
+<?php endif; ?>
+<?php if (isset($_GET['retry_done'])): ?>
+  <div class="alert info"><strong>再読み込み完了</strong><br>1回目と2回目の読取結果を項目ごとに表示しています。採用する値を選んでください。</div>
+<?php endif; ?>
 <?php if (!empty($data['warnings'])): ?>
   <div class="alert info"><strong>解析メモ</strong><br><?= h(implode(' / ', array_map('strval', $data['warnings']))) ?></div>
 <?php endif; ?>
-<?php if (!empty($data['_ai_rule_mapping'])): ?>
+<?php if (false && !empty($data['_ai_rule_mapping'])): ?>
   <?php $mapInfo = is_array($data['_ai_rule_mapping']) ? $data['_ai_rule_mapping'] : []; ?>
   <div class="alert info">
     <strong>AI項目化</strong><br>
@@ -345,6 +364,58 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     <a class="btn ghost" href="<?= h(app_url('/prescription_job_image.php?job_id=' . (string)$jobId)) ?>" target="_blank" rel="noopener">画像を別画面で開く</a>
     <a class="btn ghost" href="<?= h(app_url('/prescription_io_debug.php?job_id=' . (string)$jobId)) ?>">IO診断を見る</a>
     <img src="<?= h(app_url('/prescription_job_image.php?job_id=' . (string)$jobId)) ?>" alt="撮影した処方箋画像" loading="lazy">
+    <div class="button-row">
+      <?php if ($canRetryOcr): ?>
+        <form method="post" action="<?= h(app_url('/prescription_retry_analyze.php')) ?>" onsubmit="return confirm('同じ画像をもう一度gpt-4o-miniで読み込みます。2回目以降は再読み込みできません。実行しますか？');">
+          <?= Csrf::field() ?>
+          <input type="hidden" name="job_id" value="<?= h((string)$jobId) ?>">
+          <button class="btn ghost" type="submit">再読み込みする（2回目まで）</button>
+        </form>
+      <?php else: ?>
+        <span class="form-help"><?= h($retryDisabledReason !== '' ? $retryDisabledReason : '再読み込みは未実行または上限到達です。') ?></span>
+      <?php endif; ?>
+    </div>
+  </section>
+<?php endif; ?>
+<?php if ($ocrAttempts): ?>
+  <section class="card rule-check-panel" aria-label="AI読取比較">
+    <div class="rule-check-head">
+      <div>
+        <h2>AI読取比較</h2>
+        <p>1回目と2回目の読み取り内容を項目ごとに比較します。採用する値を選ぶと、下の修正欄と保存用の値へ反映されます。3回目以降は再読込せず手入力で修正します。</p>
+      </div>
+      <div class="rule-summary">
+        <span class="rule-badge info">読取 <?= h((string)count($ocrAttempts)) ?>回</span>
+        <?php if (!$canRetryOcr): ?><span class="rule-badge warning">再読込不可</span><?php endif; ?>
+      </div>
+    </div>
+    <?php $labels = class_exists('PrescriptionOcrAttemptService') ? PrescriptionOcrAttemptService::coreFieldLabels() : []; ?>
+    <div class="rule-check-list ocr-attempt-compare-list">
+      <?php foreach ($labels as $fieldKey => $fieldLabel): ?>
+        <?php
+          $hasAny = false;
+          foreach ($ocrAttempts as $attempt) {
+              $v = trim((string)($attempt['values'][$fieldKey] ?? ''));
+              if ($v !== '') { $hasAny = true; break; }
+          }
+        ?>
+        <?php if (!$hasAny && !in_array($fieldKey, ['patient.name','patient.birth_date','insurance.insurance_no','insurance.insured_symbol_number','prescription.issued_on','medical_institution.name','medical_institution.doctor_name'], true)) continue; ?>
+        <article class="rule-check-item <?= $hasAny ? 'info' : 'warning' ?>" data-attempt-field="<?= h($fieldKey) ?>">
+          <strong><?= h($fieldLabel) ?></strong>
+          <div class="attempt-choice-row">
+            <?php foreach ($ocrAttempts as $attempt): ?>
+              <?php $attemptNo = (int)($attempt['attempt_no'] ?? 0); $v = trim((string)($attempt['values'][$fieldKey] ?? '')); ?>
+              <label class="attempt-choice">
+                <input type="radio" name="attempt_choice_<?= h($fieldKey) ?>" value="<?= h($v) ?>" data-attempt-choice data-field-key="<?= h($fieldKey) ?>" <?= $attemptNo === 1 ? 'checked' : '' ?>>
+                <span><?= h((string)$attemptNo) ?>回目</span>
+                <code><?= h($v !== '' ? $v : '判定不能') ?></code>
+              </label>
+            <?php endforeach; ?>
+          </div>
+          <?php if (!$hasAny): ?><p>AIでは読めていません。入力しないとQR作成へ進めません。</p><?php endif; ?>
+        </article>
+      <?php endforeach; ?>
+    </div>
   </section>
 <?php endif; ?>
 <form class="card result-card" method="post" action="<?= h(app_url('/prescription_confirm.php')) ?>">
@@ -361,6 +432,11 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   <input type="hidden" name="issued_on" data-fixed-field="prescription.issued_on" value="<?= h((string)($prescription['issued_on'] ?? '')) ?>">
   <input type="hidden" name="medical_institution_code" data-fixed-field="medical_institution.code" value="<?= h((string)($medical['code'] ?? '')) ?>">
   <input type="hidden" name="medical_institution_name" data-fixed-field="medical_institution.name" value="<?= h((string)($medical['name'] ?? '')) ?>">
+  <input type="hidden" name="medical_institution_address" data-fixed-field="medical_institution.address" value="<?= h((string)($medical['address'] ?? '')) ?>">
+  <input type="hidden" name="medical_institution_phone" data-fixed-field="medical_institution.phone" value="<?= h((string)($medical['phone'] ?? '')) ?>">
+  <input type="hidden" name="doctor_name" data-fixed-field="medical_institution.doctor_name" value="<?= h((string)($medical['doctor_name'] ?? '')) ?>">
+  <input type="hidden" name="public_payer_no" data-fixed-field="public_expense.payer_no" value="<?= h((string)($publicExpense['payer_no'] ?? '')) ?>">
+  <input type="hidden" name="public_beneficiary_no" data-fixed-field="public_expense.beneficiary_no" value="<?= h((string)($publicExpense['beneficiary_no'] ?? '')) ?>">
 
   <input type="hidden" name="ai_patient_name" value="<?= h((string)($patient['name'] ?? '')) ?>">
   <input type="hidden" name="ai_gender" value="<?= h((string)($patient['gender'] ?? '')) ?>">
@@ -372,12 +448,47 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   <input type="hidden" name="ai_medical_institution_code" value="<?= h((string)($medical['code'] ?? '')) ?>">
   <input type="hidden" name="ai_medical_institution_name" value="<?= h((string)($medical['name'] ?? '')) ?>">
 
-  <div class="confirm-flow-note">
+  <div class="confirm-flow-note" hidden style="display:none;">
     <span class="flow-step active">1. 読み取り項目を修正</span>
     <span class="flow-step">2. DB保存・補助学習</span>
     <span class="flow-step">3. 必要時だけ再解析テスト</span>
     <span class="flow-step">4. 使用項目選択・QR作成</span>
   </div>
+
+  <?php if ($validationSummary || $fieldValidations): ?>
+    <section class="rule-check-panel" aria-label="PHP検証スコア">
+      <div class="rule-check-head">
+        <div>
+          <h2>PHP検証スコア</h2>
+          <p>AIの自己申告confidenceではなく、番号ルール・日付・薬品辞書・変更不可/図形判定から作った実測寄りのスコアです。</p>
+        </div>
+        <div class="rule-summary">
+          <span class="rule-badge info">最終 <?= h((string)($validationSummary['final_score'] ?? '0')) ?>%</span>
+          <span class="rule-badge danger">NG <?= h((string)($validationSummary['ng'] ?? '0')) ?></span>
+          <span class="rule-badge warning">判定不能 <?= h((string)($validationSummary['unknown'] ?? '0')) ?></span>
+          <span class="rule-badge warning">要確認 <?= h((string)($validationSummary['review'] ?? '0')) ?></span>
+          <span class="rule-badge info">OK <?= h((string)($validationSummary['ok'] ?? '0')) ?></span>
+          <?php if (!$qrReady): ?><span class="rule-badge danger">QR不可 <?= h((string)($validationSummary['blocks_qr'] ?? '0')) ?></span><?php endif; ?>
+        </div>
+      </div>
+      <?php if ($fieldValidations): ?>
+        <div class="rule-check-list">
+          <?php foreach (array_slice($fieldValidations, 0, 12) as $validation): ?>
+            <?php $status = (string)($validation['status'] ?? 'review'); $sev = ($status === 'ng' || $status === 'unknown') ? 'danger' : ($status === 'ok' ? 'info' : 'warning'); ?>
+            <article class="rule-check-item <?= h($sev) ?>">
+              <strong><?= h((string)($validation['field_label'] ?? '検証項目')) ?> / <?= h((string)($validation['final_score'] ?? '0')) ?>%</strong>
+              <p><?= h((string)($validation['reason'] ?? '')) ?></p>
+              <div class="rule-check-meta">
+                <?php if (trim((string)($validation['raw_value'] ?? '')) !== ''): ?><span>読取: <?= h((string)$validation['raw_value']) ?></span><?php endif; ?>
+                <?php if (trim((string)($validation['normalized_value'] ?? '')) !== ''): ?><span>正規化: <?= h((string)$validation['normalized_value']) ?></span><?php endif; ?>
+                <?php if (!empty($validation['needs_human_check'])): ?><span class="attention">人間確認</span><?php endif; ?>
+              </div>
+            </article>
+          <?php endforeach; ?>
+        </div>
+      <?php endif; ?>
+    </section>
+  <?php endif; ?>
 
   <?php if ($ruleChecks): ?>
     <section class="rule-check-panel" aria-label="処方箋受付ルール判定">
@@ -636,15 +747,25 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   <div class="button-row end sticky-save-actions">
     <a class="btn ghost" href="<?= h(app_url('/prescription_scan.php')) ?>">再撮影</a>
     <?php if ($jobId > 0): ?><a class="btn ghost" href="<?= h(app_url('/prescription_io_debug.php?job_id=' . (string)$jobId)) ?>">IO診断を見る</a><?php endif; ?>
-    <?php if ($jobId > 0): ?>
-      <button class="btn ghost" type="submit" name="after_save_action" value="reparse_test">保存して再解析テスト</button>
-    <?php endif; ?>
+    <?php if (!$qrReady): ?><span class="form-help attention">判定不能/NGの必須項目があります。保存時にも再判定し、未入力のままQR作成には進めません。</span><?php endif; ?>
     <button class="btn primary" type="submit" name="after_save_action" value="normal">修正内容をDB保存して次へ</button>
   </div>
 </form>
 <script>
 (function () {
   var FIELD_GROUP_LABELS = <?= json_encode($dynamicFieldGroupLabels, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+
+  document.addEventListener('change', function (event) {
+    var choice = event.target.closest('[data-attempt-choice]');
+    if (!choice) return;
+    var key = choice.getAttribute('data-field-key') || '';
+    var value = choice.value || '';
+    var fixed = document.querySelector('[data-fixed-field=\"' + CSS.escape(key) + '\"]');
+    if (fixed) fixed.value = value;
+    document.querySelectorAll('[data-review-value][data-field-key=\"' + CSS.escape(key) + '\"]').forEach(function (input) { input.value = value; input.dispatchEvent(new Event('input', { bubbles: true })); });
+    var preview = document.querySelector('[data-preview=\"' + CSS.escape(key) + '\"]');
+    if (preview) preview.textContent = value;
+  });
 
   function renumberMedicationRows() {
     document.querySelectorAll('[data-med-list] .ocr-med-row').forEach(function (row, index) {
@@ -889,6 +1010,11 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       case 'prescription.issued_on': return findReviewValueByLabel('prescription', [/交付年月日/, /発行日/, /issued/i]);
       case 'medical_institution.code': return findReviewValueByLabel('medical_institution', [/医療機関コード/, /コード/]);
       case 'medical_institution.name': return findReviewValueByLabel('medical_institution', [/医療機関名/, /医療機関.*名称/, /所在.*名称/]);
+      case 'medical_institution.address': return findReviewValueByLabel('medical_institution', [/所在地/, /住所/]);
+      case 'medical_institution.phone': return findReviewValueByLabel('medical_institution', [/電話/]);
+      case 'medical_institution.doctor_name': return findReviewValueByLabel('medical_institution', [/保険医氏名/, /医師/, /署名/]);
+      case 'public_expense.payer_no': return findReviewValueByLabel('public_expense', [/公費負担者番号/]);
+      case 'public_expense.beneficiary_no': return findReviewValueByLabel('public_expense', [/受給者番号/, /公費負担医療/]);
       default: return null;
     }
   }

@@ -108,6 +108,28 @@ final class PrescriptionOcrService
             $ai = $openaiClient->extractFromImage($ocrStored['path'], $ocrStored['mime_type'], null);
             $openaiMs = self::elapsedMs($openaiStart);
             $normalized = is_array($ai['normalized'] ?? null) ? $ai['normalized'] : [];
+            $aiNormalized = $normalized;
+            if (class_exists('PrescriptionFieldPostProcessorService')) {
+                $normalized = (new PrescriptionFieldPostProcessorService())->process($normalized);
+            }
+            if (class_exists('PrescriptionOcrAttemptService')) {
+                $normalized = (new PrescriptionOcrAttemptService())->attachFirstAttempt($normalized, $ai, [
+                    'model_name' => $modelSummaryText,
+                    'ocr_storage_file_id' => (int)($ocrStored['storage_file_id'] ?? 0),
+                    'ocr_image_bytes' => (int)($ocrStored['size'] ?? 0),
+                ]);
+            }
+            if (class_exists('PrescriptionOcrDatasetService')) {
+                (new PrescriptionOcrDatasetService())->saveEvent($tenantId, $jobId, null, 'ai_read_attempt_1', [
+                    'original_storage_file' => $stored,
+                    'ocr_storage_file' => $ocrStored,
+                    'ocr_raw_text' => (string)($ai['ocr_raw_text'] ?? ''),
+                    'ocr_structured_json' => $ai['ocr_structured_json'] ?? [],
+                    'prescription_item_json' => $ai['prescription_item_json'] ?? [],
+                    'ai_normalized_json' => $aiNormalized,
+                    'php_validated_json' => $normalized,
+                ], ['policy' => 'gpt4o-mini first attempt; legacy learning disabled']);
+            }
             $debug = new PrescriptionIoDebugService();
 
             $debug->saveSnapshot($tenantId, $jobId, null, 'ocr_raw_text', '1. OCR生テキスト: 画像から起こした文字', (string)($ai['ocr_raw_text'] ?? ''), [
@@ -145,10 +167,17 @@ final class PrescriptionOcrService
                 'minimal_analysis' => true,
                 'created_by_user_id' => (int)$user['id'],
             ]);
-            $debug->saveSnapshot($tenantId, $jobId, null, 'openai_normalized', '処方箋項目JSON正規化後', $normalized, [
+            $debug->saveSnapshot($tenantId, $jobId, null, 'openai_normalized', 'OpenAI項目JSON正規化後（AI自己confidenceを含む）', $aiNormalized, [
                 'model_name' => (string)($ai['model'] ?? $modelSummaryText),
                 'model_tier' => $modelSummary,
                 'minimal_analysis' => true,
+                'created_by_user_id' => (int)$user['id'],
+            ]);
+            $debug->saveSnapshot($tenantId, $jobId, null, 'php_validated_output', 'PHP検証後: ルール・辞書・図形判定・final score', $normalized, [
+                'model_name' => (string)($ai['model'] ?? $modelSummaryText),
+                'model_tier' => $modelSummary,
+                'minimal_analysis' => true,
+                'post_processor' => 'PrescriptionFieldPostProcessorService',
                 'created_by_user_id' => (int)$user['id'],
             ]);
 
@@ -228,6 +257,135 @@ final class PrescriptionOcrService
         }
 
         return $jobId;
+    }
+
+    public function retryJob(array $user, int $jobId): int
+    {
+        $tenantId = (int)$user['tenant_id'];
+        $pdo = Db::branch();
+        $job = self::getJob($tenantId, $jobId);
+        if (!$job) {
+            throw new RuntimeException('再読み込み対象の解析ジョブが見つかりません。');
+        }
+        $current = is_array($job['normalized'] ?? null) ? $job['normalized'] : [];
+        $attemptService = new PrescriptionOcrAttemptService();
+        $current = $attemptService->refreshAttemptSummary($current);
+        if (empty($current['_can_retry_ocr'])) {
+            throw new RuntimeException((string)($current['_ocr_retry_disabled_reason'] ?? '再読み込みは2回までです。以降は手入力で修正してください。'));
+        }
+        $attemptNo = ((int)($current['_ocr_attempt_count'] ?? 1)) + 1;
+        if ($attemptNo > PrescriptionOcrAttemptService::MAX_ATTEMPTS) {
+            throw new RuntimeException('再読み込みは2回までです。以降は手入力で修正してください。');
+        }
+
+        $fileStmt = $pdo->prepare('SELECT * FROM storage_files WHERE id = :id AND tenant_id = :tenant_id LIMIT 1');
+        $fileStmt->execute([':id' => (int)($job['original_storage_file_id'] ?? 0), ':tenant_id' => $tenantId]);
+        $sf = $fileStmt->fetch();
+        if (!$sf || !is_file((string)$sf['stored_path'])) {
+            throw new RuntimeException('原本画像が見つからないため再読み込みできません。');
+        }
+        $stored = [
+            'storage_file_id' => (int)$sf['id'],
+            'path' => (string)$sf['stored_path'],
+            'mime_type' => (string)($sf['mime_type'] ?? 'image/jpeg'),
+            'width' => null,
+            'height' => null,
+            'size' => (int)($sf['file_size_bytes'] ?? 0),
+            'sha256' => (string)($sf['sha256_hash'] ?? ''),
+            'original_filename' => (string)($sf['original_filename'] ?? ''),
+        ];
+        $imgSize = @getimagesize($stored['path']);
+        if (is_array($imgSize)) {
+            $stored['width'] = (int)$imgSize[0];
+            $stored['height'] = (int)$imgSize[1];
+        }
+
+        $modelTier = 'low';
+        $modelSummary = OpenAiPrescriptionClient::modelTierSummary($modelTier);
+        $modelSummaryText = $modelSummary['summary'];
+        $openaiClient = $this->openai->withModelTier($modelTier);
+        $start = microtime(true);
+        $pdo->prepare('UPDATE prescription_parse_jobs SET status = "analyzing", updated_at = NOW() WHERE id = :id')->execute([':id' => $jobId]);
+
+        try {
+            $ai = $openaiClient->extractFromImage($stored['path'], $stored['mime_type'], null);
+            $aiNormalized = is_array($ai['normalized'] ?? null) ? $ai['normalized'] : [];
+            $newNormalized = $aiNormalized;
+            if (class_exists('PrescriptionFieldPostProcessorService')) {
+                $newNormalized = (new PrescriptionFieldPostProcessorService())->process($newNormalized);
+            }
+            $merged = $attemptService->mergeRetryAttempt($current, $newNormalized, $ai, [
+                'model_name' => $modelSummaryText,
+                'retry_of_parse_job_id' => $jobId,
+                'ocr_storage_file_id' => (int)$stored['storage_file_id'],
+                'ocr_image_bytes' => (int)$stored['size'],
+            ]);
+
+            $debug = new PrescriptionIoDebugService();
+            $debug->saveSnapshot($tenantId, $jobId, null, 'ai_retry_attempt_' . $attemptNo, 'AI再読み込み' . $attemptNo . '回目: OCR/項目JSON/PHP検証', [
+                'attempt_no' => $attemptNo,
+                'ocr_raw_text' => (string)($ai['ocr_raw_text'] ?? ''),
+                'ocr_structured_json' => $ai['ocr_structured_json'] ?? [],
+                'prescription_item_json' => $ai['prescription_item_json'] ?? [],
+                'ai_normalized_json' => $aiNormalized,
+                'php_validated_json' => $newNormalized,
+                'merged_display_json' => $merged,
+            ], [
+                'model_name' => $modelSummaryText,
+                'model_tier' => $modelSummary,
+                'created_by_user_id' => (int)$user['id'],
+                'minimal_analysis' => true,
+            ]);
+
+            if (class_exists('PrescriptionOcrDatasetService')) {
+                (new PrescriptionOcrDatasetService())->saveEvent($tenantId, $jobId, null, 'ai_read_attempt_' . $attemptNo, [
+                    'source_storage_file' => $stored,
+                    'ocr_raw_text' => (string)($ai['ocr_raw_text'] ?? ''),
+                    'ocr_structured_json' => $ai['ocr_structured_json'] ?? [],
+                    'prescription_item_json' => $ai['prescription_item_json'] ?? [],
+                    'ai_normalized_json' => $aiNormalized,
+                    'php_validated_json' => $newNormalized,
+                    'merged_display_json' => $merged,
+                ], ['policy' => 'manual retry; max 2 attempts']);
+            }
+
+            $rawResponse = is_array($job['raw_response_json'] ?? null) ? $job['raw_response_json'] : json_decode((string)($job['raw_response_json'] ?? '{}'), true);
+            if (!is_array($rawResponse)) {
+                $rawResponse = [];
+            }
+            $rawResponse['retry_attempt_' . $attemptNo] = is_array($ai['raw'] ?? null) ? $ai['raw'] : [];
+            $rawResponse['model_tier'] = $modelSummary;
+            $rawResponse['retry_policy'] = ['max_attempts' => PrescriptionOcrAttemptService::MAX_ATTEMPTS];
+
+            $stmt = $pdo->prepare('UPDATE prescription_parse_jobs
+                SET status = "needs_review", model_name = :model_name, raw_response_json = :raw, normalized_json = :normalized,
+                    overall_confidence = :confidence, updated_at = NOW()
+                WHERE id = :id');
+            $stmt->execute([
+                ':model_name' => $modelSummaryText,
+                ':raw' => json_encode($rawResponse, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE),
+                ':normalized' => json_encode($merged, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE),
+                ':confidence' => (float)($merged['overall_confidence'] ?? 0),
+                ':id' => $jobId,
+            ]);
+
+            $this->saveMetrics($jobId, $tenantId, current_company_uid(), current_branch_uid(), [
+                'preprocessing_ms' => 0,
+                'template_detection_ms' => 0,
+                'openai_ms' => self::elapsedMs($start),
+                'correction_ms' => 0,
+                'total_ms' => self::elapsedMs($start),
+                'image_bytes_before' => (int)$stored['size'],
+                'image_bytes_after' => (int)$stored['size'],
+                'openai_model' => $modelSummaryText . ' retry_attempt_' . $attemptNo,
+                'image_detail' => (string)app_config('openai.vision_detail', 'high'),
+            ]);
+            return $jobId;
+        } catch (Throwable $e) {
+            $pdo->prepare('UPDATE prescription_parse_jobs SET status = "failed", error_message = :error, updated_at = NOW() WHERE id = :id')
+                ->execute([':error' => mb_substr($e->getMessage(), 0, 4000), ':id' => $jobId]);
+            throw $e;
+        }
     }
 
     public static function getJob(int $tenantId, int $jobId): ?array

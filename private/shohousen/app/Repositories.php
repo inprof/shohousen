@@ -499,10 +499,108 @@ function medication_name_learning_rows_from_post(array $post): array
 }
 
 
+
+/**
+ * QR作成へ進む前の最終入力チェック。
+ * AIが空欄を読んだ項目は「判定不能」として、入力されるまで保存/QR導線へ進ませない。
+ * 判定はAI confidenceではなく、厚生労働省資料に基づく桁数・検証番号・日付成立性で行う。
+ */
+function assert_prescription_post_ready_for_qr(array $post): void
+{
+    $errors = [];
+    $required = [
+        'patient_name' => '氏名',
+        'birth_date' => '生年月日',
+        'insurance_no' => '保険者番号',
+        'insured_symbol_number' => '被保険者証・被保険者手帳の記号・番号',
+        'issued_on' => '交付年月日',
+        'medical_institution_code' => '医療機関コード',
+        'medical_institution_name' => '保険医療機関名',
+        'doctor_name' => '保険医氏名',
+    ];
+    foreach ($required as $key => $label) {
+        if (trim((string)($post[$key] ?? '')) === '') {
+            $errors[] = '判定不能: ' . $label . 'が空欄です。AIが読めなかった場合も、手入力しないとQR作成へ進めません。';
+        }
+    }
+
+    foreach (['birth_date' => '生年月日', 'issued_on' => '交付年月日'] as $key => $label) {
+        $value = trim((string)($post[$key] ?? ''));
+        if ($value !== '' && normalize_prescription_date_value($value) === null) {
+            $errors[] = 'NG: ' . $label . 'が日付として判定できません。和暦または西暦で入力してください。';
+        }
+    }
+
+    if (class_exists('PrescriptionReferenceRuleService')) {
+        foreach ([
+            'insurance_no' => ['保険者番号', 'insurance_no'],
+            'medical_institution_code' => ['医療機関コード', 'medical_institution_code'],
+        ] as $key => [$label, $type]) {
+            $value = trim((string)($post[$key] ?? ''));
+            if ($value !== '') {
+                $check = PrescriptionReferenceRuleService::validateCode($type, $value);
+                if (empty($check['valid'])) {
+                    $errors[] = 'NG: ' . $label . ' - ' . (string)($check['message'] ?? '厚生労働省資料の番号ルールに一致しません。');
+                }
+            }
+        }
+        $publicPayer = trim((string)($post['public_payer_no'] ?? ''));
+        $publicBeneficiary = trim((string)($post['public_beneficiary_no'] ?? ''));
+        if ($publicPayer !== '' || $publicBeneficiary !== '') {
+            if ($publicPayer === '') {
+                $errors[] = '判定不能: 公費負担者番号が空欄です。公費受給者番号がある場合は入力してください。';
+            } else {
+                $check = PrescriptionReferenceRuleService::validateCode('public_payer_no', $publicPayer);
+                if (empty($check['valid'])) {
+                    $errors[] = 'NG: 公費負担者番号 - ' . (string)($check['message'] ?? '8桁/検証番号ルールに一致しません。');
+                }
+            }
+            if ($publicBeneficiary === '') {
+                $errors[] = '判定不能: 公費負担医療の受給者番号が空欄です。公費負担者番号がある場合は入力してください。';
+            } else {
+                $check = PrescriptionReferenceRuleService::validateCode('public_beneficiary_no', $publicBeneficiary);
+                if (empty($check['valid'])) {
+                    $errors[] = 'NG: 公費負担医療の受給者番号 - ' . (string)($check['message'] ?? '7桁/検証番号ルールに一致しません。');
+                }
+            }
+        }
+    }
+
+    $drugNames = $post['drug_name'] ?? [];
+    $hasDrug = false;
+    foreach ($drugNames as $i => $drugName) {
+        $name = trim((string)$drugName);
+        $usage = trim((string)($post['usage_text'][$i] ?? ''));
+        $days = trim((string)($post['days_count'][$i] ?? ''));
+        $amount = trim((string)($post['amount_text'][$i] ?? ''));
+        if ($name === '' && $usage === '' && $days === '' && $amount === '') {
+            continue;
+        }
+        $hasDrug = true;
+        if ($name === '') {
+            $errors[] = '判定不能: 処方' . (string)($i + 1) . 'の薬品名が空欄です。';
+        }
+        if ($usage === '') {
+            $errors[] = '判定不能: 処方' . (string)($i + 1) . 'の用法が空欄です。';
+        }
+        if ($days === '' && $amount === '') {
+            $errors[] = '判定不能: 処方' . (string)($i + 1) . 'の日数または総量が空欄です。';
+        }
+    }
+    if (!$hasDrug) {
+        $errors[] = '判定不能: 薬の情報が0件です。再読み込みまたは手入力してください。';
+    }
+
+    if ($errors) {
+        throw new RuntimeException(implode("\n", array_values(array_unique($errors))));
+    }
+}
+
 function create_prescription_from_post(array $user, array $post): int
 {
     $tenantId = (int)$user['tenant_id'];
     $pdo = Db::branch();
+    assert_prescription_post_ready_for_qr($post);
     $pdo->beginTransaction();
     try {
         $patientId = find_or_create_patient($tenantId, $post);
@@ -630,9 +728,17 @@ function create_prescription_from_post(array $user, array $post): int
         $ioDebug->saveSnapshot($tenantId, $parseJobId, $prescriptionId, 'confirmed_post', '人間修正後: 確定POSTデータ', $confirmedSnapshot, [
             'created_by_user_id' => (int)$user['id'],
         ]);
-        (new PrescriptionKnowledgeService())->savePipelineTrace($tenantId, $parseJobId ?? 0, $prescriptionId, 'confirmed_post', 'write', $confirmedSnapshot, [
-            'created_by_user_id' => (int)$user['id'],
-        ]);
+        if (class_exists('PrescriptionOcrDatasetService')) {
+            (new PrescriptionOcrDatasetService())->saveEvent($tenantId, $parseJobId, $prescriptionId, 'human_corrected_confirmed', $confirmedSnapshot, [
+                'created_by_user_id' => (int)$user['id'],
+                'source' => 'prescription_confirm.php',
+            ]);
+        }
+        if (!(bool)app_config('prescription_new_validation.disable_legacy_learning', true)) {
+            (new PrescriptionKnowledgeService())->savePipelineTrace($tenantId, $parseJobId ?? 0, $prescriptionId, 'confirmed_post', 'write', $confirmedSnapshot, [
+                'created_by_user_id' => (int)$user['id'],
+            ]);
+        }
 
         // 処方箋受付時に薬局が確認すべきルールを、人間修正後データで再判定して保存する。
         // 期限切れ、変更不可/署名、患者希望、一般名処方、必須項目、信頼度などはQR作成前の確認材料にする。
@@ -651,6 +757,9 @@ function create_prescription_from_post(array $user, array $post): int
         // 解析結果確認画面で人間修正が確定した時点で、補助学習DBへ反映する。
         // 使用項目の選択は拠点ごとの運用設定なので、補助学習スコアには使わない。
         try {
+            if ((bool)app_config('prescription_new_validation.disable_legacy_learning', true)) {
+                throw new RuntimeException('legacy learning disabled');
+            }
             $knowledge = new PrescriptionKnowledgeService();
             $correctionRows = correction_learning_rows_from_selected_fields($selectedFields);
             if ($selectedFields) {
@@ -685,15 +794,19 @@ function create_prescription_from_post(array $user, array $post): int
             $ioDebug->saveSnapshot($tenantId, $parseJobId, $prescriptionId, 'db_saved_prescription', 'DB保存後: 処方箋保存データ', $savedForDebug, [
                 'created_by_user_id' => (int)$user['id'],
             ]);
-            (new PrescriptionKnowledgeService())->savePipelineTrace($tenantId, $parseJobId ?? 0, $prescriptionId, 'db_saved_prescription', 'write', $savedForDebug, [
-                'created_by_user_id' => (int)$user['id'],
-            ]);
+            if (!(bool)app_config('prescription_new_validation.disable_legacy_learning', true)) {
+                (new PrescriptionKnowledgeService())->savePipelineTrace($tenantId, $parseJobId ?? 0, $prescriptionId, 'db_saved_prescription', 'write', $savedForDebug, [
+                    'created_by_user_id' => (int)$user['id'],
+                ]);
+            }
         }
 
         if ($parseJobId) {
             $job = PrescriptionOcrService::getJob($tenantId, $parseJobId);
             if ($job && is_array($job['normalized'] ?? null)) {
-                (new PrescriptionFeedbackService())->saveCorrections($parseJobId, $tenantId, $job['normalized'], $post);
+                if (!(bool)app_config('prescription_new_validation.disable_legacy_learning', true)) {
+                    (new PrescriptionFeedbackService())->saveCorrections($parseJobId, $tenantId, $job['normalized'], $post);
+                }
                 $pdo->prepare('UPDATE prescription_parse_jobs SET status = "confirmed", prescription_id = :prescription_id, confirmed_at = NOW(), updated_at = NOW() WHERE id = :id')
                     ->execute([':prescription_id' => $prescriptionId, ':id' => $parseJobId]);
             }

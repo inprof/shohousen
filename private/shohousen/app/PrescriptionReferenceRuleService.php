@@ -147,16 +147,42 @@ final class PrescriptionReferenceRuleService
     {
         $len = strlen($digits);
         if (in_array($len, $validLengths, true)) {
+            $checksumApplicable = !in_array($type, ['medical_institution_code', 'pharmacy_code'], true) || $len === 10;
+            $checksumValid = null;
+            $expectedCheckDigit = null;
+            if ($checksumApplicable && $len >= 2) {
+                $expectedCheckDigit = self::expectedMod10CheckDigit(substr($digits, 0, -1));
+                $checksumValid = $expectedCheckDigit === (int)substr($digits, -1);
+            }
+            if ($checksumValid === false) {
+                return [
+                    'type' => $type,
+                    'raw' => $raw,
+                    'digits' => $digits,
+                    'length' => $len,
+                    'status' => 'invalid_check_digit',
+                    'valid' => false,
+                    'needs_human_check' => true,
+                    'message' => '検証番号が厚生労働省資料の算出ルールと一致しません。読取値または別欄混在を確認してください。',
+                    'classification' => self::classifyCode($type, $digits),
+                    'expected_check_digit' => $expectedCheckDigit,
+                    'actual_check_digit' => (int)substr($digits, -1),
+                    'checksum_applicable' => true,
+                ];
+            }
             return [
                 'type' => $type,
                 'raw' => $raw,
                 'digits' => $digits,
                 'length' => $len,
-                'status' => 'valid_length',
+                'status' => $checksumApplicable ? 'valid_length_and_check_digit' : 'valid_length_check_digit_unverifiable_without_prefecture_score',
                 'valid' => true,
-                'needs_human_check' => false,
-                'message' => '',
+                'needs_human_check' => !$checksumApplicable,
+                'message' => $checksumApplicable ? '' : '7桁の医療機関等コード単体では検証番号の完全照合に都道府県番号・点数表番号が必要です。',
                 'classification' => self::classifyCode($type, $digits),
+                'expected_check_digit' => $expectedCheckDigit,
+                'actual_check_digit' => $checksumApplicable ? (int)substr($digits, -1) : null,
+                'checksum_applicable' => $checksumApplicable,
             ];
         }
         return [
@@ -170,6 +196,24 @@ final class PrescriptionReferenceRuleService
             'message' => $invalidMessage,
             'classification' => '',
         ];
+    }
+
+
+    private static function expectedMod10CheckDigit(string $prefixDigits): int
+    {
+        $digits = self::digitsOnly($prefixDigits);
+        if ($digits === '') {
+            return 0;
+        }
+        $sum = 0;
+        $weight = 2;
+        for ($i = strlen($digits) - 1; $i >= 0; $i--) {
+            $product = ((int)$digits[$i]) * $weight;
+            $sum += $product >= 10 ? (int)floor($product / 10) + ($product % 10) : $product;
+            $weight = $weight === 2 ? 1 : 2;
+        }
+        $last = $sum % 10;
+        return $last === 0 ? 0 : 10 - $last;
     }
 
     private static function classifyCode(string $type, string $digits): string
