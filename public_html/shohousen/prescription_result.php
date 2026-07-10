@@ -15,6 +15,21 @@ if (!$job) {
     $data = $job['normalized'];
 }
 
+$serverValidationErrors = [];
+$restorePost = null;
+if (!empty($_SESSION['prescription_validation_errors']) && is_array($_SESSION['prescription_validation_errors'])) {
+    $serverValidationErrors = array_values(array_filter(array_map('strval', $_SESSION['prescription_validation_errors'])));
+    unset($_SESSION['prescription_validation_errors']);
+}
+if (!empty($_SESSION['prescription_validation_old_post']) && is_array($_SESSION['prescription_validation_old_post'])) {
+    $candidatePost = $_SESSION['prescription_validation_old_post'];
+    unset($_SESSION['prescription_validation_old_post']);
+    $candidateJobId = (int)($candidatePost['parse_job_id'] ?? 0);
+    if ($candidateJobId === $jobId || $jobId === 0) {
+        $restorePost = $candidatePost;
+    }
+}
+
 $minimalAnalysisMode = (bool)app_config('prescription_minimal_analysis.enabled', true);
 $validationSummary = is_array($data['validation_summary'] ?? null) ? $data['validation_summary'] : [];
 $fieldValidations = is_array($data['field_validations'] ?? null) ? $data['field_validations'] : [];
@@ -31,6 +46,63 @@ $publicExpense = is_array($data['public_expense'] ?? null) ? $data['public_expen
 $substitution = is_array($data['substitution'] ?? null) ? $data['substitution'] : [];
 $medications = is_array($data['medications'] ?? null) ? $data['medications'] : [];
 $dynamicFields = is_array($data['form_fields'] ?? null) ? $data['form_fields'] : [];
+if ($restorePost) {
+    $patient['name'] = trim((string)($restorePost['patient_name'] ?? ($patient['name'] ?? '')));
+    $patient['gender'] = trim((string)($restorePost['gender'] ?? ($patient['gender'] ?? '')));
+    $patient['birth_date'] = trim((string)($restorePost['birth_date'] ?? ($patient['birth_date'] ?? '')));
+    $insurance['insurance_no'] = trim((string)($restorePost['insurance_no'] ?? ($insurance['insurance_no'] ?? '')));
+    $insurance['insured_symbol_number'] = trim((string)($restorePost['insured_symbol_number'] ?? ($insurance['insured_symbol_number'] ?? '')));
+    $insurance['copay_rate'] = trim((string)($restorePost['copay_rate'] ?? ($insurance['copay_rate'] ?? '')));
+    $publicExpense['payer_no'] = trim((string)($restorePost['public_payer_no'] ?? ($publicExpense['payer_no'] ?? '')));
+    $publicExpense['beneficiary_no'] = trim((string)($restorePost['public_beneficiary_no'] ?? ($publicExpense['beneficiary_no'] ?? '')));
+    $prescription['issued_on'] = trim((string)($restorePost['issued_on'] ?? ($prescription['issued_on'] ?? '')));
+    $medical['code'] = trim((string)($restorePost['medical_institution_code'] ?? ($medical['code'] ?? '')));
+    $medical['name'] = trim((string)($restorePost['medical_institution_name'] ?? ($medical['name'] ?? '')));
+    $medical['address'] = trim((string)($restorePost['medical_institution_address'] ?? ($medical['address'] ?? '')));
+    $medical['phone'] = trim((string)($restorePost['medical_institution_phone'] ?? ($medical['phone'] ?? '')));
+    $medical['doctor_name'] = trim((string)($restorePost['doctor_name'] ?? ($medical['doctor_name'] ?? '')));
+
+    $restoredMeds = [];
+    $drugNames = is_array($restorePost['drug_name'] ?? null) ? $restorePost['drug_name'] : [];
+    foreach ($drugNames as $i => $drugName) {
+        $restoredMeds[] = [
+            'drug_name' => trim((string)$drugName),
+            'generic_name' => trim((string)(($restorePost['generic_name'] ?? [])[$i] ?? '')),
+            'brand_name' => trim((string)(($restorePost['brand_name'] ?? [])[$i] ?? '')),
+            'raw_drug_text' => trim((string)(($restorePost['raw_drug_text'] ?? [])[$i] ?? '')),
+            'dose_text' => trim((string)(($restorePost['dose_text'] ?? [])[$i] ?? '')),
+            'usage_text' => trim((string)(($restorePost['usage_text'] ?? [])[$i] ?? '')),
+            'days_count' => trim((string)(($restorePost['days_count'] ?? [])[$i] ?? '')),
+            'amount_text' => trim((string)(($restorePost['amount_text'] ?? [])[$i] ?? '')),
+            'stock_status' => trim((string)(($restorePost['stock_status'] ?? [])[$i] ?? 'unknown')),
+            'name_relation' => trim((string)(($restorePost['drug_name_relation_type'] ?? [])[$i] ?? 'unknown')),
+        ];
+    }
+    if ($restoredMeds) {
+        $medications = $restoredMeds;
+    }
+
+    if (!empty($restorePost['original_dynamic_key']) && is_array($restorePost['original_dynamic_key'])) {
+        $dynamicFields = [];
+        foreach ($restorePost['original_dynamic_key'] as $i => $key) {
+            $dynamicFields[] = [
+                'field_key' => (string)$key,
+                'field_label' => (string)(($restorePost['original_dynamic_label'] ?? [])[$i] ?? $key),
+                'field_group' => (string)(($restorePost['original_dynamic_group'] ?? [])[$i] ?? 'other'),
+                'value' => (string)(($restorePost['original_dynamic_value'] ?? [])[$i] ?? ''),
+                'ai_value' => (string)(($restorePost['original_dynamic_ai_value'] ?? [])[$i] ?? ''),
+                'source_section' => (string)(($restorePost['original_dynamic_source_section'] ?? [])[$i] ?? ''),
+                'confidence' => (string)(($restorePost['original_dynamic_confidence'] ?? [])[$i] ?? ''),
+                'needs_human_check' => (string)(($restorePost['original_dynamic_needs_human_check'] ?? [])[$i] ?? '') === '1',
+                'include_default' => true,
+                'ui_template' => (string)(($restorePost['original_dynamic_ui_template'] ?? [])[$i] ?? 'input'),
+                'display_order' => (int)(($restorePost['original_dynamic_display_order'] ?? [])[$i] ?? (1000 + $i)),
+                'is_empty_cell' => (string)(($restorePost['original_dynamic_is_empty_cell'] ?? [])[$i] ?? '') === '1',
+                'source' => 'restored_post',
+            ];
+        }
+    }
+}
 $fieldPreferences = [];
 if (!$minimalAnalysisMode) {
     try {
@@ -56,7 +128,7 @@ $fieldGroupLabels = [
     'pharmacy' => '薬局記入欄',
     'note' => '備考・注意',
     'qr' => 'QR・コード',
-    'other' => 'その他AI項目',
+    'other' => 'その他項目',
 ];
 $dynamicFieldGroupLabels = $fieldGroupLabels;
 unset($dynamicFieldGroupLabels['medication']);
@@ -335,8 +407,18 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
 ?>
 <section class="page-title">
   <h1>解析結果確認</h1>
-  <p>AIが読み取った項目を一覧で表示しています。ここでは使う/使わないは選ばず、値の修正と不足項目の追加だけを行います。</p>
+  <p>読み取った項目を確認し、値の修正と不足項目の追加を行います。未入力の必須項目がある場合は赤く表示し、DB保存には進みません。</p>
 </section>
+<?php if ($serverValidationErrors): ?>
+  <div class="alert danger validation-alert" data-server-validation-alert>
+    <strong>未入力または修正が必要な項目があります。</strong><br>
+    <?= h(implode(' / ', $serverValidationErrors)) ?>
+  </div>
+<?php endif; ?>
+<div class="alert danger validation-alert" data-validation-alert hidden>
+  <strong>未入力または修正が必要な項目があります。</strong><br>
+  <span data-validation-alert-text>赤く表示された項目を入力してください。</span>
+</div>
 <?php if (!empty($_SESSION['prescription_retry_error'])): ?>
   <div class="alert danger"><strong>再読み込みエラー</strong><br><?= h((string)$_SESSION['prescription_retry_error']) ?></div>
   <?php unset($_SESSION['prescription_retry_error']); ?>
@@ -355,7 +437,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     <?php if (!empty($mapInfo['error'])): ?><br>理由: <?= h((string)$mapInfo['error']) ?><?php endif; ?>
   </div>
 <?php endif; ?>
-<?php if ($jobId > 0): ?>
+<?php if (false && $jobId > 0): ?>
   <section class="card ocr-source-preview">
     <div>
       <h2>撮影画像</h2>
@@ -377,7 +459,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     </div>
   </section>
 <?php endif; ?>
-<?php if ($ocrAttempts): ?>
+<?php if (false && $ocrAttempts): ?>
   <section class="card rule-check-panel" aria-label="AI読取比較">
     <div class="rule-check-head">
       <div>
@@ -455,7 +537,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     <span class="flow-step">4. 使用項目選択・QR作成</span>
   </div>
 
-  <?php if ($validationSummary || $fieldValidations): ?>
+  <?php if (false && ($validationSummary || $fieldValidations)): ?>
     <section class="rule-check-panel" aria-label="PHP検証スコア">
       <div class="rule-check-head">
         <div>
@@ -525,8 +607,8 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   <section class="dynamic-field-card dynamic-field-review-card">
     <div class="dynamic-field-head">
       <div>
-        <h2>AI読み取り項目の修正</h2>
-        <p>患者・保険・公費・医療機関など、処方薬以外の項目を修正します。処方薬は下の専用カードだけで修正・保存します。</p>
+        <h2>読み取り項目の修正</h2>
+        <p>患者・保険・公費・医療機関など、処方薬以外の項目を修正します。項目名と分類は拠点ひな型の候補として保存します。処方薬は下の専用カードだけで修正・保存します。</p>
       </div>
       <div class="field-actions dynamic-add-controls">
         <label class="field-add-target">
@@ -542,7 +624,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     </div>
 
     <?php if (!$reviewRows): ?>
-      <div class="alert warning">AIが読み取り項目を返していません。必要な項目は「項目を追加」から入力してください。</div>
+      <div class="alert warning">読み取り項目がありません。必要な項目は「項目を追加」から入力してください。</div>
     <?php endif; ?>
 
     <div class="dynamic-field-grid" data-dynamic-field-list>
@@ -587,11 +669,8 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
               </label>
             </div>
             <div class="field-meta">
-              <span>AI読取値（自動保持）: <?= h($aiValue !== '' ? $aiValue : '空欄') ?></span>
               <?php if (!empty($field['source_section'])): ?><span><?= h((string)$field['source_section']) ?></span><?php endif; ?>
-              <?php $confidenceBadge = review_confidence_badge($confidence, $field); ?>
-              <?php if ($confidenceBadge !== ''): ?><span><?= h($confidenceBadge) ?></span><?php endif; ?>
-              <?php if (!empty($field['needs_human_check'])): ?><span class="attention">要確認</span><?php endif; ?>
+              <?php if (trim($value) === ''): ?><span class="attention">未入力</span><?php elseif (!empty($field['needs_human_check'])): ?><span class="attention">要確認</span><?php endif; ?>
             </div>
           </div>
 
@@ -616,7 +695,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
             <label><span class="field-label">分類</span><select name="original_dynamic_group[]" data-manual-group-select><?php foreach ($dynamicFieldGroupLabels as $g => $gLabel): ?><option value="<?= h($g) ?>"><?= h($gLabel) ?></option><?php endforeach; ?></select></label>
             <label class="review-field-value"><span class="field-label">修正後の値</span><textarea name="original_dynamic_value[]" rows="2" placeholder="追加で読み取り・入力した値" data-review-value data-field-key="manual_field"></textarea></label>
           </div>
-          <div class="field-meta"><span>人間追加項目</span><span class="attention">AI未検出</span></div>
+          <div class="field-meta"><span>手入力追加項目</span><span class="attention">読取なし</span></div>
         </div>
         <input type="hidden" name="original_dynamic_key[]" value="manual_field">
         <input type="hidden" name="original_dynamic_ai_value[]" value="">
@@ -711,7 +790,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     </div>
   </template>
 
-  <section class="prescription-confirm-preview" aria-label="修正内容の確認プレビュー">
+  <section class="prescription-confirm-preview" aria-label="修正内容の確認プレビュー" hidden style="display:none;">
     <div class="preview-head">
       <h2>修正内容の確認プレビュー</h2>
       <p>上で修正した内容を、保存前に処方箋風にまとめて確認します。入力を変更すると自動で反映されます。</p>
@@ -746,7 +825,6 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
 
   <div class="button-row end sticky-save-actions">
     <a class="btn ghost" href="<?= h(app_url('/prescription_scan.php')) ?>">再撮影</a>
-    <?php if ($jobId > 0): ?><a class="btn ghost" href="<?= h(app_url('/prescription_io_debug.php?job_id=' . (string)$jobId)) ?>">IO診断を見る</a><?php endif; ?>
     <?php if (!$qrReady): ?><span class="form-help attention">判定不能/NGの必須項目があります。保存時にも再判定し、未入力のままQR作成には進めません。</span><?php endif; ?>
     <button class="btn primary" type="submit" name="after_save_action" value="normal">修正内容をDB保存して次へ</button>
   </div>
@@ -917,7 +995,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
 
     var title = document.createElement('h3');
     title.className = 'dynamic-field-group';
-    title.textContent = FIELD_GROUP_LABELS[group] || FIELD_GROUP_LABELS.other || 'その他AI項目';
+    title.textContent = FIELD_GROUP_LABELS[group] || FIELD_GROUP_LABELS.other || 'その他項目';
 
     var button = document.createElement('button');
     button.className = 'btn ghost small';
@@ -1086,10 +1164,189 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     }
   });
 
+  function clearValidationHighlights() {
+    document.querySelectorAll('.validation-missing').forEach(function (node) { node.classList.remove('validation-missing'); });
+    document.querySelectorAll('[aria-invalid="true"]').forEach(function (node) { node.removeAttribute('aria-invalid'); });
+    document.querySelectorAll('[data-validation-message]').forEach(function (node) { node.remove(); });
+  }
+
+  function appendValidationMessage(container, message) {
+    if (!container) return;
+    var msg = document.createElement('div');
+    msg.className = 'validation-message';
+    msg.setAttribute('data-validation-message', '1');
+    msg.textContent = message;
+    container.appendChild(msg);
+  }
+
+  function markControlInvalid(control, message) {
+    if (!control) return;
+    control.classList.add('validation-missing');
+    control.setAttribute('aria-invalid', 'true');
+    var row = control.closest('.review-field-row') || control.closest('.ocr-med-row') || control.closest('label') || control.parentElement;
+    if (row) {
+      row.classList.add('validation-missing');
+      appendValidationMessage(row, message);
+    }
+  }
+
+  function markFieldInvalid(key, label, message) {
+    var control = findReviewValueByExactKey(key) || fixedFieldFallbackControl(key);
+    markControlInvalid(control, message || (label + 'を入力してください。'));
+  }
+
+  function fixedValue(key) {
+    var control = findReviewValueByExactKey(key) || fixedFieldFallbackControl(key);
+    if (control) return String(control.value || '').trim();
+    var hidden = document.querySelector('[data-fixed-field="' + key + '"]');
+    return hidden ? String(hidden.value || '').trim() : '';
+  }
+
+  function showValidationAlert(messages) {
+    var alert = document.querySelector('[data-validation-alert]');
+    var text = document.querySelector('[data-validation-alert-text]');
+    if (!alert || !text) return;
+    text.textContent = messages.length ? messages.join(' / ') : '赤く表示された項目を入力してください。';
+    alert.hidden = false;
+    alert.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+
+  function hideValidationAlert() {
+    var alert = document.querySelector('[data-validation-alert]');
+    if (alert) alert.hidden = true;
+  }
+
+  function markMedicationFieldInvalid(index, fieldName, message) {
+    var rows = Array.from(document.querySelectorAll('[data-med-list] .ocr-med-row'));
+    var row = rows[index] || null;
+    if (!row) return;
+    markControlInvalid(row.querySelector('[name="' + fieldName + '[]"]'), message);
+  }
+
+  function markServerValidationErrors(messages) {
+    if (!Array.isArray(messages) || !messages.length) return;
+    messages.forEach(function (message) {
+      var text = String(message || '');
+      if (text.includes('氏名') && !text.includes('保険医')) markFieldInvalid('patient.name', '患者名', text);
+      if (text.includes('生年月日')) markFieldInvalid('patient.birth_date', '生年月日', text);
+      if (text.includes('保険者番号')) markFieldInvalid('insurance.insurance_no', '保険者番号', text);
+      if (text.includes('被保険者証') || text.includes('記号・番号') || text.includes('記号番号')) markFieldInvalid('insurance.insured_symbol_number', '被保険者証・記号番号', text);
+      if (text.includes('交付年月日')) markFieldInvalid('prescription.issued_on', '交付年月日', text);
+      if (text.includes('医療機関コード')) markFieldInvalid('medical_institution.code', '医療機関コード', text);
+      if (text.includes('保険医療機関名')) markFieldInvalid('medical_institution.name', '保険医療機関名', text);
+      if (text.includes('保険医氏名')) markFieldInvalid('medical_institution.doctor_name', '保険医氏名', text);
+      if (text.includes('公費負担者番号')) markFieldInvalid('public_expense.payer_no', '公費負担者番号', text);
+      if (text.includes('公費負担医療の受給者番号') || text.includes('公費受給者番号')) markFieldInvalid('public_expense.beneficiary_no', '公費負担医療の受給者番号', text);
+      var medMatch = text.match(/処方(\d+)の(.+?)が/);
+      if (medMatch) {
+        var medIndex = parseInt(medMatch[1], 10) - 1;
+        if (text.includes('薬品名')) markMedicationFieldInvalid(medIndex, 'drug_name', text);
+        if (text.includes('用法')) markMedicationFieldInvalid(medIndex, 'usage_text', text);
+        if (text.includes('日数') || text.includes('総量')) {
+          markMedicationFieldInvalid(medIndex, 'days_count', text);
+          markMedicationFieldInvalid(medIndex, 'amount_text', text);
+        }
+      }
+    });
+    var first = document.querySelector('[aria-invalid="true"]');
+    if (first && typeof first.scrollIntoView === 'function') first.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+
+  function validateResultBeforeSubmit(shouldFocus) {
+    syncFixedHiddenFields();
+    recalculateAllMedicationAmounts();
+    clearValidationHighlights();
+    var messages = [];
+    var requiredFields = [
+      ['patient.name', '患者名'],
+      ['patient.birth_date', '生年月日'],
+      ['insurance.insurance_no', '保険者番号'],
+      ['insurance.insured_symbol_number', '被保険者証・記号番号'],
+      ['prescription.issued_on', '交付年月日'],
+      ['medical_institution.code', '医療機関コード'],
+      ['medical_institution.name', '保険医療機関名'],
+      ['medical_institution.doctor_name', '保険医氏名']
+    ];
+    requiredFields.forEach(function (item) {
+      if (!fixedValue(item[0])) {
+        var message = item[1] + 'が未入力です。';
+        messages.push(message);
+        markFieldInvalid(item[0], item[1], message);
+      }
+    });
+
+    var publicPayer = fixedValue('public_expense.payer_no');
+    var publicBeneficiary = fixedValue('public_expense.beneficiary_no');
+    if (publicPayer || publicBeneficiary) {
+      if (!publicPayer) {
+        var payerMessage = '公費負担者番号が未入力です。';
+        messages.push(payerMessage);
+        markFieldInvalid('public_expense.payer_no', '公費負担者番号', payerMessage);
+      }
+      if (!publicBeneficiary) {
+        var beneficiaryMessage = '公費負担医療の受給者番号が未入力です。';
+        messages.push(beneficiaryMessage);
+        markFieldInvalid('public_expense.beneficiary_no', '公費負担医療の受給者番号', beneficiaryMessage);
+      }
+    }
+
+    var hasMedication = false;
+    document.querySelectorAll('[data-med-list] .ocr-med-row').forEach(function (row, index) {
+      var drug = row.querySelector('[name="drug_name[]"]');
+      var usage = row.querySelector('[name="usage_text[]"]');
+      var days = row.querySelector('[name="days_count[]"]');
+      var amount = row.querySelector('[name="amount_text[]"]');
+      var drugValue = String(drug?.value || '').trim();
+      var usageValue = String(usage?.value || '').trim();
+      var daysValue = String(days?.value || '').trim();
+      var amountValue = String(amount?.value || '').trim();
+      if (!drugValue && !usageValue && !daysValue && !amountValue) return;
+      hasMedication = true;
+      if (!drugValue) {
+        var drugMessage = '処方' + (index + 1) + 'の薬品名が未入力です。';
+        messages.push(drugMessage);
+        markControlInvalid(drug, drugMessage);
+      }
+      if (!usageValue) {
+        var usageMessage = '処方' + (index + 1) + 'の用法が未入力です。';
+        messages.push(usageMessage);
+        markControlInvalid(usage, usageMessage);
+      }
+      if (!daysValue && !amountValue) {
+        var daysMessage = '処方' + (index + 1) + 'の日数または総量が未入力です。';
+        messages.push(daysMessage);
+        markControlInvalid(days, daysMessage);
+        markControlInvalid(amount, daysMessage);
+      }
+    });
+    if (!hasMedication) {
+      var medList = document.querySelector('[data-med-list]');
+      if (medList) {
+        medList.classList.add('validation-missing');
+        appendValidationMessage(medList, '薬の情報が0件です。薬品行を追加して入力してください。');
+      }
+      messages.push('薬の情報が0件です。');
+    }
+
+    if (messages.length) {
+      showValidationAlert(Array.from(new Set(messages)));
+      if (shouldFocus !== false) {
+        var first = document.querySelector('[aria-invalid="true"]');
+        if (first && typeof first.focus === 'function') first.focus({ preventScroll: true });
+      }
+      return false;
+    }
+    hideValidationAlert();
+    return true;
+  }
+
   document.addEventListener('submit', function (event) {
     if (event.target instanceof HTMLFormElement && event.target.classList.contains('result-card')) {
       syncFixedHiddenFields();
       syncPreview();
+      if (!validateResultBeforeSubmit(true)) {
+        event.preventDefault();
+      }
     }
   });
 
@@ -1146,6 +1403,12 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   });
 
   syncPreview();
+  var SERVER_VALIDATION_ERRORS = <?= json_encode($serverValidationErrors, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) ?>;
+  var HAS_SERVER_VALIDATION_ERROR = SERVER_VALIDATION_ERRORS.length > 0;
+  if (HAS_SERVER_VALIDATION_ERROR) {
+    validateResultBeforeSubmit(false);
+    markServerValidationErrors(SERVER_VALIDATION_ERRORS);
+  }
 })();
 </script>
 <?php View::footer(); ?>

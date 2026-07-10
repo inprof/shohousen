@@ -122,7 +122,7 @@ View::header('使用項目の選択', ['styles' => ['/assets/css/prescription_fi
 </section>
 
 <?php if (($_GET['saved'] ?? '') === '1'): ?>
-  <div class="alert success"><strong>DB保存済み</strong><br>前画面で修正した内容を拠点DBに保存し、AI値と人間修正値の差分を補助学習DBへ反映しました。</div>
+  <div class="alert success"><strong>DB保存済み</strong><br>前画面で修正した内容を拠点DBに保存し、項目名・分類・順序を拠点ひな型候補へ反映しました。</div>
 <?php endif; ?>
 
 <form class="card result-card" method="post" action="<?= h(app_url('/prescription_field_select.php')) ?>">
@@ -191,15 +191,11 @@ View::header('使用項目の選択', ['styles' => ['/assets/css/prescription_fi
               <span class="field-label"><?= h((string)$field['field_label']) ?></span>
               <input name="dynamic_field_value[<?= $i ?>]" value="<?= h($fieldValue) ?>" placeholder="空欄" readonly>
             </label>
-            <div class="field-compare">
-              <div><span>AI値</span><code><?= h($aiValue !== '' ? $aiValue : '空欄') ?></code></div>
-              <div><span>修正後</span><strong><?= h($fieldValue !== '' ? $fieldValue : '空欄') ?></strong></div>
-            </div>
             <div class="field-meta">
               <span>DB保存済み</span>
+              <span>ひな型候補</span>
               <?php if (!empty($field['source_section'])): ?><span><?= h((string)$field['source_section']) ?></span><?php endif; ?>
-              <span><?= h(field_select_confidence_label($field['confidence'] ?? null)) ?></span>
-              <?php if ($needs): ?><span class="attention">修正済み/要確認</span><?php endif; ?>
+              <?php if ($fieldValue === ''): ?><span class="attention">空欄</span><?php elseif ($needs): ?><span class="attention">要確認</span><?php endif; ?>
             </div>
           </div>
 

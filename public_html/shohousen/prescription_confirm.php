@@ -20,6 +20,15 @@ try {
     }
     redirect('/prescription_field_select.php?id=' . $prescriptionId . '&saved=1');
 } catch (Throwable $e) {
+    $message = $e->getMessage();
+    if ($e instanceof RuntimeException && (str_contains($message, '判定不能:') || str_contains($message, 'NG:'))) {
+        $_SESSION['prescription_validation_errors'] = array_values(array_filter(array_map('trim', preg_split('/\\R/u', $message) ?: [])));
+        $_SESSION['prescription_validation_old_post'] = $_POST;
+        $jobId = (int)($_POST['parse_job_id'] ?? 0);
+        $url = $jobId > 0 ? '/prescription_result.php?job_id=' . $jobId . '&validation_error=1' : '/prescription_scan.php';
+        redirect($url);
+    }
+
     http_response_code(500);
     View::header('DB保存エラー');
     ?>

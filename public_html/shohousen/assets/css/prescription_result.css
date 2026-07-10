@@ -390,3 +390,37 @@
   font-size: 11px;
   line-height: 1.4;
 }
+
+/* DB保存前の未入力警告 */
+.validation-alert {
+  margin-bottom: 16px;
+}
+.review-field-row.validation-missing,
+.ocr-med-row.validation-missing,
+.edit-med-list.validation-missing {
+  border-color: #dc2626;
+  background: #fff5f5;
+}
+.review-field-row.validation-missing .field-label,
+.ocr-med-row.validation-missing label,
+.validation-message {
+  color: #b91c1c;
+}
+input.validation-missing,
+textarea.validation-missing,
+select.validation-missing {
+  border-color: #dc2626 !important;
+  background: #fff7f7;
+  box-shadow: 0 0 0 3px rgba(220, 38, 38, .12);
+}
+.validation-message {
+  grid-column: 1 / -1;
+  margin-top: 6px;
+  font-size: 12px;
+  font-weight: 700;
+}
+.edit-med-list.validation-missing {
+  padding: 10px;
+  border: 1px solid #dc2626;
+  border-radius: 12px;
+}

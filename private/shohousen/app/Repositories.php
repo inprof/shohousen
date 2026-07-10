@@ -188,11 +188,12 @@ function selected_prescription_fields_from_post(array $post): array
     $outputCandidates = $post['dynamic_field_output_candidate'] ?? [];
     $needsChecks = $post['dynamic_field_needs_human_check'] ?? [];
     $displayOrders = $post['dynamic_field_display_order'] ?? [];
+    $fromReviewScreen = false;
 
-    // 解析結果確認画面では、まだ「使う/使わない」を選ばない。
-    // その段階では original_dynamic_* として送られるため、ここで保存用の形式へ変換する。
-    // is_selected/include_for_output は false にして、次の使用項目選択画面で更新する。
+    // 解析結果確認画面では、項目名・分類・順序を拠点ひな型候補へ保存する。
+    // original_dynamic_* で送られた項目は、値がある限りひな型学習対象として扱う。
     if (!$keys && !empty($post['original_dynamic_key'])) {
+        $fromReviewScreen = true;
         $keys = $post['original_dynamic_key'] ?? [];
         $labels = $post['original_dynamic_label'] ?? [];
         $groups = $post['original_dynamic_group'] ?? [];
@@ -227,11 +228,19 @@ function selected_prescription_fields_from_post(array $post): array
             continue;
         }
 
-        // 何も値がなく、かつ未選択の項目は保存しない。空欄だが選択された項目は「空欄確認済み」として保存する。
-        $isSelected = isset($selected[$i]) && (string)$selected[$i] === '1';
+        $needsHumanCheck = isset($needsChecks[$i]) && (string)$needsChecks[$i] === '1';
+
+        // 使用項目選択画面から来た場合は選択状態を尊重する。
+        // 解析結果確認画面から来た場合は、値がある項目をひな型候補として選択済みにする。
+        $isSelected = $fromReviewScreen
+            ? ($value !== '' || $aiValue !== '' || $needsHumanCheck)
+            : (isset($selected[$i]) && (string)$selected[$i] === '1');
         if (!$isSelected && $value === '' && $aiValue === '') {
             continue;
         }
+        $includeForOutput = $fromReviewScreen
+            ? ($value !== '')
+            : ($isSelected && (isset($outputCandidates[$i]) ? (string)$outputCandidates[$i] === '1' : true));
 
         $rows[] = [
             'field_key' => mb_substr($key, 0, 120),
@@ -241,9 +250,9 @@ function selected_prescription_fields_from_post(array $post): array
             'source_ai_value' => $aiValue,
             'source_section' => mb_substr((string)($sections[$i] ?? ''), 0, 160),
             'confidence' => normalize_prescription_confidence_percent($confidences[$i] ?? null),
-            'needs_human_check' => isset($needsChecks[$i]) && (string)$needsChecks[$i] === '1',
+            'needs_human_check' => $needsHumanCheck,
             'is_selected' => $isSelected,
-            'include_for_output' => $isSelected && (isset($outputCandidates[$i]) ? (string)$outputCandidates[$i] === '1' : true),
+            'include_for_output' => $includeForOutput,
             'display_order' => is_numeric($displayOrders[$i] ?? null) ? (int)$displayOrders[$i] : ($i + 1),
         ];
     }
@@ -751,42 +760,54 @@ function create_prescription_from_post(array $user, array $post): int
             // ルール判定保存失敗で処方箋自体の保存は止めない。
         }
 
-        // 使用項目の採用傾向は次の使用項目選択画面で保存する。
-        // ここではOCR補正・レイアウト学習だけを行う。
-
-        // 解析結果確認画面で人間修正が確定した時点で、補助学習DBへ反映する。
-        // 使用項目の選択は拠点ごとの運用設定なので、補助学習スコアには使わない。
+        // 解析結果確認画面で確定した項目名・分類・順序は、旧AI判定スコアではなく拠点ひな型候補へ反映する。
+        // disable_legacy_learning=true の場合も、ひな型候補だけは継続して保存する。
         try {
-            if ((bool)app_config('prescription_new_validation.disable_legacy_learning', true)) {
-                throw new RuntimeException('legacy learning disabled');
-            }
             $knowledge = new PrescriptionKnowledgeService();
-            $correctionRows = correction_learning_rows_from_selected_fields($selectedFields);
+            $layoutSaved = false;
             if ($selectedFields) {
-                $knowledge->saveConfirmedCorrectionLearning($parseJobId, $tenantId, $correctionRows);
-                $knowledge->saveLayoutFieldLearning($parseJobId, $tenantId, $selectedFields);
+                $knowledge->saveLayoutTemplateLearning($parseJobId, $tenantId, $selectedFields);
+                $knowledge->saveFieldObservations($parseJobId, $tenantId, $prescriptionId, $selectedFields);
+                $layoutSaved = true;
             }
-            $drugLearningRows = medication_name_learning_rows_from_post($post);
-            if ($drugLearningRows) {
-                $knowledge->saveDrugNameLearningEvents($parseJobId, $tenantId, $prescriptionId, $drugLearningRows);
+
+            $legacyLearningEnabled = !(bool)app_config('prescription_new_validation.disable_legacy_learning', true);
+            $correctionRows = [];
+            $drugLearningRows = [];
+            if ($legacyLearningEnabled) {
+                $correctionRows = correction_learning_rows_from_selected_fields($selectedFields);
+                if ($selectedFields) {
+                    $knowledge->saveConfirmedCorrectionLearning($parseJobId, $tenantId, $correctionRows);
+                }
+                $drugLearningRows = medication_name_learning_rows_from_post($post);
+                if ($drugLearningRows) {
+                    $knowledge->saveDrugNameLearningEvents($parseJobId, $tenantId, $prescriptionId, $drugLearningRows);
+                }
             }
+
             $learningSummary = [
                 'parse_job_id' => $parseJobId,
                 'prescription_id' => $prescriptionId,
+                'layout_template_rows' => count($selectedFields),
+                'layout_template_saved' => $layoutSaved,
+                'legacy_learning_enabled' => $legacyLearningEnabled,
                 'field_learning_rows' => count($correctionRows),
-                'selected_field_rows' => count($selectedFields),
                 'drug_learning_rows' => count($drugLearningRows),
-                'score_basis' => 'AI値と人間修正後の確定値を比較し、人間修正後を正解として補助学習DBに保存',
+                'score_basis' => $legacyLearningEnabled
+                    ? '旧補助学習も有効。項目名・分類・順序は拠点ひな型候補へ保存。'
+                    : '旧AI判定スコアは無効。項目名・分類・順序のみ拠点ひな型候補へ保存。',
                 'saved_at' => date('c'),
             ];
-            $ioDebug->saveSnapshot($tenantId, $parseJobId, $prescriptionId, 'learning_saved_summary', '補助学習保存後: スコア化対象サマリー', $learningSummary, [
+            $ioDebug->saveSnapshot($tenantId, $parseJobId, $prescriptionId, 'layout_template_saved_summary', 'ひな型候補保存後: 確定項目サマリー', $learningSummary, [
                 'created_by_user_id' => (int)$user['id'],
             ]);
-            $knowledge->savePipelineTrace($tenantId, $parseJobId ?? 0, $prescriptionId, 'learning_saved_summary', 'learning', $learningSummary, [
-                'created_by_user_id' => (int)$user['id'],
-            ]);
+            if ($legacyLearningEnabled) {
+                $knowledge->savePipelineTrace($tenantId, $parseJobId ?? 0, $prescriptionId, 'layout_template_saved_summary', 'learning', $learningSummary, [
+                    'created_by_user_id' => (int)$user['id'],
+                ]);
+            }
         } catch (Throwable) {
-            // 補助学習DBの一時不調で拠点DBへの確定保存を止めない。
+            // ひな型候補/補助学習DBの一時不調で拠点DBへの確定保存を止めない。
         }
 
         $savedForDebug = get_prescription($tenantId, $prescriptionId);

@@ -52,7 +52,7 @@ View::header('確定保存完了');
     <h2>保存された読み取り項目</h2>
     <div class="table-card saved-fields-table">
       <table class="data-table compact">
-        <thead><tr><th>使用</th><th>項目</th><th>値</th><th>区分</th><th>信頼度</th></tr></thead>
+        <thead><tr><th>使用</th><th>項目</th><th>値</th><th>区分</th><th>状態</th></tr></thead>
         <tbody>
         <?php foreach (($prescription['selected_fields'] ?? []) as $field): ?>
           <tr class="<?= !empty($field['include_for_output']) ? '' : 'muted-row' ?>">
