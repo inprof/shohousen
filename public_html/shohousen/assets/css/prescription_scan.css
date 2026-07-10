@@ -67,3 +67,18 @@
   .scan-frame { min-height: 180px; max-height: 32vh; }
   .scan-frame img { max-height: 32vh; }
 }
+
+/* .model-tier-fixed: 解析モデルを固定表示し、選択UIは出さない。 */
+.model-tier-fixed {
+  display: grid;
+  gap: 4px;
+  margin: 16px 0;
+  padding: 12px;
+  border: 1px solid #d8dee8;
+  border-radius: 10px;
+  background: #f8fafc;
+}
+
+.model-tier-fixed strong { font-size: 14px; color: var(--text); }
+.model-tier-fixed span { font-weight: 700; color: #1f4f7a; }
+.model-tier-fixed .hint { margin: 0; }

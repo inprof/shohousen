@@ -32,6 +32,8 @@ final class OpenAiPrescriptionJsonParseException extends RuntimeException
 
 final class OpenAiPrescriptionClient
 {
+    private const FIXED_ANALYSIS_MODEL = 'gpt-4o-mini';
+
     private string $modelTier;
 
     public function __construct(?string $modelTier = null)
@@ -47,6 +49,18 @@ final class OpenAiPrescriptionClient
     /** @return array<string,array<string,string>> */
     public static function modelTierOptions(): array
     {
+        if ((bool)app_config('prescription_minimal_analysis.lock_to_gpt4o_mini', true)) {
+            return [
+                'low' => [
+                    'label' => 'gpt-4o-mini固定',
+                    'description' => '現在は解析モデルをgpt-4o-miniのみに固定しています。',
+                    'ocr_model' => self::FIXED_ANALYSIS_MODEL,
+                    'structure_model' => self::FIXED_ANALYSIS_MODEL,
+                    'mapping_model' => self::FIXED_ANALYSIS_MODEL,
+                ],
+            ];
+        }
+
         $configured = app_config('openai.model_tiers', []);
         if (!is_array($configured) || $configured === []) {
             $configured = app_config('openai_model_tiers', []);
@@ -71,6 +85,9 @@ final class OpenAiPrescriptionClient
     public static function normalizeModelTier(?string $tier): string
     {
         $tier = strtolower(trim((string)$tier));
+        if ((bool)app_config('prescription_minimal_analysis.lock_to_gpt4o_mini', true)) {
+            return 'low';
+        }
         $aliases = [
             'hi' => 'high',
             'high' => 'high',
@@ -138,6 +155,10 @@ final class OpenAiPrescriptionClient
 
     private function modelForStage(string $stage): string
     {
+        if ((bool)app_config('prescription_minimal_analysis.lock_to_gpt4o_mini', true)) {
+            return self::FIXED_ANALYSIS_MODEL;
+        }
+
         $summary = self::modelTierSummary($this->modelTier);
         return match ($stage) {
             'ocr' => $summary['ocr_model'],

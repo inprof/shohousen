@@ -1,36 +1,10 @@
 <?php
 require_once dirname(__DIR__, 2) . '/private/shohousen/app/bootstrap.php';
 $user = Auth::requireBranchSelected();
-if (method_exists(OpenAiPrescriptionClient::class, 'modelTierOptions')) {
-    $modelTierOptions = OpenAiPrescriptionClient::modelTierOptions();
-    $defaultModelTier = OpenAiPrescriptionClient::normalizeModelTier((string)app_config('openai.default_model_tier', 'high'));
-} else {
-    $fallbackModel = (string)app_config('openai.model', 'gpt-4o-mini');
-    $modelTierOptions = [
-        'high' => [
-            'label' => '高精度',
-            'description' => '精度優先。OCR読取と項目化を高精度モデルで実行します。',
-            'ocr_model' => (string)app_config('openai.high.ocr_model', 'gpt-5.5'),
-            'structure_model' => (string)app_config('openai.high.structure_model', 'gpt-5.5'),
-            'mapping_model' => (string)app_config('openai.high.mapping_model', 'gpt-5.4-mini'),
-        ],
-        'middle' => [
-            'label' => '中価格',
-            'description' => '価格と精度のバランス。通常テスト向けです。',
-            'ocr_model' => (string)app_config('openai.middle.ocr_model', 'gpt-5.4'),
-            'structure_model' => (string)app_config('openai.middle.structure_model', 'gpt-5.4-mini'),
-            'mapping_model' => (string)app_config('openai.middle.mapping_model', 'gpt-5.4-mini'),
-        ],
-        'low' => [
-            'label' => '低価格',
-            'description' => 'コスト優先。大量テスト・低コスト確認向けです。',
-            'ocr_model' => (string)app_config('openai.low.ocr_model', $fallbackModel),
-            'structure_model' => (string)app_config('openai.low.structure_model', $fallbackModel),
-            'mapping_model' => (string)app_config('openai.low.mapping_model', $fallbackModel),
-        ],
-    ];
-    $defaultModelTier = 'high';
-}
+
+// 解析モデルは当面 gpt-4o-mini 固定。将来のモデル切替導線だけ hidden で残す。
+$fixedModelTier = 'low';
+$fixedModelName = 'gpt-4o-mini';
 View::header('処方箋読込');
 ?>
 <link rel="stylesheet" href="<?= h(app_url('/assets/css/prescription_scan.css')) ?>">
@@ -52,16 +26,11 @@ View::header('処方箋読込');
         <li>暗い場所、斜め撮影、ピンぼけは解析精度が落ちます。</li>
         <li>AI解析後、人間確認・修正してからQR化します。</li>
       </ul>
-      <div class="model-tier-select" style="margin:16px 0;padding:12px;border:1px solid #d8dee8;border-radius:10px;background:#f8fafc;">
-        <label for="modelTier" style="display:block;font-weight:700;margin-bottom:6px;">解析モデル</label>
-        <select name="model_tier" id="modelTier" style="width:100%;max-width:520px;padding:10px;border:1px solid #cbd5e1;border-radius:8px;background:#fff;">
-          <?php foreach ($modelTierOptions as $tierKey => $tier): ?>
-            <option value="<?= h((string)$tierKey) ?>" <?= $tierKey === $defaultModelTier ? 'selected' : '' ?>>
-              <?= h((string)$tier['label']) ?>：OCR <?= h((string)$tier['ocr_model']) ?> / 項目化 <?= h((string)$tier['structure_model']) ?>
-            </option>
-          <?php endforeach; ?>
-        </select>
-        <p class="hint left" id="modelTierHint" style="margin-top:8px;">最小解析モードです。補助学習DBのヒント・保存、再解析テスト、AI項目配置は使わず、OCR読取と項目JSON化だけを検証します。</p>
+      <input type="hidden" name="model_tier" id="modelTier" value="<?= h($fixedModelTier) ?>">
+      <div class="model-tier-fixed" aria-label="解析モデル">
+        <strong>解析モデル</strong>
+        <span><?= h($fixedModelName) ?> 固定</span>
+        <p class="hint left">将来のモデル切替用導線は内部値として残し、画面上の高精度/中価格/低価格選択は非表示にしています。</p>
       </div>
 
       <div class="capture-actions" aria-label="処方箋画像の取り込み方法">
