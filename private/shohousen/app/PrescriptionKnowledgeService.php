@@ -366,6 +366,7 @@ final class PrescriptionKnowledgeService
                     (:company_uid, :branch_uid, :tenant_id, :parse_job_id, :prescription_id, :field_key, :field_label, :field_group, :field_value, :source_ai_value, :source_section, :confidence, :needs_human_check, :is_selected, :include_for_output, :display_order, NOW())');
 
                 foreach ($rows as $row) {
+                    $risk = $this->fieldRiskLevel((string)($row['field_group'] ?? 'other'), (string)($row['field_key'] ?? ''), (string)($row['field_label'] ?? ''));
                     $stmt->execute([
                         ':company_uid' => current_company_uid(),
                         ':branch_uid' => current_branch_uid(),
@@ -375,8 +376,8 @@ final class PrescriptionKnowledgeService
                         ':field_key' => $row['field_key'],
                         ':field_label' => $row['field_label'],
                         ':field_group' => $row['field_group'],
-                        ':field_value' => $row['field_value'],
-                        ':source_ai_value' => $row['source_ai_value'],
+                        ':field_value' => $this->learningSample((string)($row['field_value'] ?? ''), $risk),
+                        ':source_ai_value' => $this->learningSample((string)($row['source_ai_value'] ?? ''), $risk),
                         ':source_section' => $row['source_section'],
                         ':confidence' => $row['confidence'],
                         ':needs_human_check' => !empty($row['needs_human_check']) ? 1 : 0,
@@ -417,7 +418,7 @@ final class PrescriptionKnowledgeService
                         ':include_default' => $selected ? 1 : 0,
                         ':selected_count' => $selected ? 1 : 0,
                         ':unselected_count' => $selected ? 0 : 1,
-                        ':last_value_sample' => mb_substr((string)($row['field_value'] ?? ''), 0, 255),
+                        ':last_value_sample' => mb_substr($this->learningSample((string)($row['field_value'] ?? ''), $this->fieldRiskLevel((string)($row['field_group'] ?? 'other'), (string)($row['field_key'] ?? ''), (string)($row['field_label'] ?? ''))), 0, 255),
                     ]);
                 }
             }
@@ -489,8 +490,8 @@ final class PrescriptionKnowledgeService
                     ':edited_count' => $edited ? 1 : 0,
                     ':empty_count' => $empty ? 1 : 0,
                     ':last_confidence' => $confidence,
-                    ':last_ai_value_sample' => mb_substr($ai, 0, 255),
-                    ':last_final_value_sample' => mb_substr($final, 0, 255),
+                    ':last_ai_value_sample' => mb_substr($this->learningSample($ai, $this->fieldRiskLevel((string)($row['field_group'] ?? 'other'), (string)($row['field_key'] ?? ''), (string)($row['field_label'] ?? ''))), 0, 255),
+                    ':last_final_value_sample' => mb_substr($this->learningSample($final, $this->fieldRiskLevel((string)($row['field_group'] ?? 'other'), (string)($row['field_key'] ?? ''), (string)($row['field_label'] ?? ''))), 0, 255),
                     ':last_action_type' => $actionType,
                 ]);
             }

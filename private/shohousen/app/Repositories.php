@@ -789,17 +789,30 @@ function create_prescription_from_post(array $user, array $post): int
                 }
             }
 
+            $maskedTemplateLearning = false;
+            if (class_exists('PrescriptionTemplateMaskService')) {
+                (new PrescriptionTemplateMaskService())->saveConfirmedTemplateLearningAssets($tenantId, $parseJobId, $prescriptionId, $post, $selectedFields);
+                $maskedTemplateLearning = true;
+            }
+
             $learningSummary = [
                 'parse_job_id' => $parseJobId,
                 'prescription_id' => $prescriptionId,
                 'layout_template_rows' => count($selectedFields),
                 'layout_template_saved' => $layoutSaved,
+                'masked_template_learning_saved' => $maskedTemplateLearning,
                 'legacy_learning_enabled' => $legacyLearningEnabled,
                 'field_learning_rows' => count($correctionRows),
                 'drug_learning_rows' => count($drugLearningRows),
+                'db_roles' => [
+                    'superuser_admin_db' => 'inprof3_prescription',
+                    'company_parent_db' => 'inprof3_companyXXXX',
+                    'branch_child_tenant_db' => 'inprof3_tenantsXXXX',
+                    'knowledge_db' => 'inprof3_assistantdata',
+                ],
                 'score_basis' => $legacyLearningEnabled
-                    ? '旧補助学習も有効。項目名・分類・順序は拠点ひな型候補へ保存。'
-                    : '旧AI判定スコアは無効。項目名・分類・順序のみ拠点ひな型候補へ保存。',
+                    ? '旧補助学習も有効。項目名・分類・順序は補助学習DBへ保存。テンプレート素材は枠だけ/固定ラベル/補正パターンのみ保存。'
+                    : '旧AI判定スコアは無効。補助学習DBには枠だけ画像・固定ラベル・補正パターンのみ保存し、患者実値は保存しない。',
                 'saved_at' => date('c'),
             ];
             $ioDebug->saveSnapshot($tenantId, $parseJobId, $prescriptionId, 'layout_template_saved_summary', 'ひな型候補保存後: 確定項目サマリー', $learningSummary, [

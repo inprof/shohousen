@@ -2,8 +2,11 @@
 declare(strict_types=1);
 
 /**
- * PHP検証でNG/判定不能になった主要項目だけを、表示前に1回だけAIで再確認する。
- * 初回読取 + 項目別再確認 = 最大2トライとして扱い、再確認後もNGなら赤枠/手入力へ回す。
+ * PHP検証でNG/判定不能になった主要項目だけを再確認する。
+ * 1回目: 通常OCR。
+ * 2回目: NG項目だけ全体画像から再確認。
+ * 3回目: まだNGで、補助学習DBに承認済み座標がある項目だけPHP GD切り出し画像で再確認。
+ * 座標がない初見テンプレートは全体画像の項目指定再確認までで止め、赤枠/手入力へ回す。
  */
 final class PrescriptionOcrFieldAutoRepairService
 {
@@ -59,22 +62,35 @@ final class PrescriptionOcrFieldAutoRepairService
 
             $after = $this->fieldSnapshot($merged);
             $unresolved = $this->blockingRepairableKeys($merged);
-            $merged['_auto_field_retry_count'] = 1;
+            $cropAttempt = [];
+            if ($unresolved && (bool)app_config('prescription_field_crop.enabled', true) && class_exists('PrescriptionFieldCropService')) {
+                $cropAttempt = $this->repairUnresolvedWithCrops($client, $imagePath, $mimeType, $merged, $unresolved, $ocrStructured);
+                if (is_array($cropAttempt['normalized'] ?? null)) {
+                    $merged = $cropAttempt['normalized'];
+                    if (class_exists('PrescriptionFieldPostProcessorService')) {
+                        $merged = (new PrescriptionFieldPostProcessorService())->process($merged);
+                    }
+                    $unresolved = $this->blockingRepairableKeys($merged);
+                }
+            }
+            $merged['_auto_field_retry_count'] = !empty($cropAttempt['executed']) ? 2 : 1;
             $merged['_auto_field_repair'] = [
                 'enabled' => true,
                 'executed' => true,
                 'attempt_no' => 2,
                 'target_fields' => $targets,
                 'before' => $before,
-                'after' => $after,
+                'after_attempt_2' => $after,
+                'after' => $this->fieldSnapshot($merged),
                 'returned_fields' => is_array($repair['fields'] ?? null) ? $repair['fields'] : [],
                 'warnings' => array_values(array_map('strval', (array)($repair['warnings'] ?? []))),
                 'overall_confidence' => is_numeric($repair['overall_confidence'] ?? null) ? (float)$repair['overall_confidence'] : null,
                 'model' => (string)($repair['model'] ?? ''),
+                'crop_attempt' => $cropAttempt,
                 'unresolved_fields' => $unresolved,
                 'message' => $unresolved
                     ? '項目別再確認後も解決できない必須項目があります。赤枠の項目は手入力または再撮影してください。'
-                    : '項目別再確認で主要項目を補正しました。黄色の項目は原画像で確認してください。',
+                    : (!empty($cropAttempt['executed']) ? 'PHP GD切り出し再確認を含めて主要項目を補正しました。黄色の項目は原画像で確認してください。' : '項目別再確認で主要項目を補正しました。黄色の項目は原画像で確認してください。'),
             ];
             if ($unresolved) {
                 $merged['warnings'][] = '項目別再確認後も未解決: ' . implode(' / ', array_values($unresolved));
@@ -94,6 +110,101 @@ final class PrescriptionOcrFieldAutoRepairService
             $normalized['warnings'] = array_values(array_unique(array_filter(array_map('strval', (array)($normalized['warnings'] ?? [])))));
             return $normalized;
         }
+    }
+
+    /**
+     * 2回目でも残ったNG項目のうち、補助学習DBに承認済み座標があるものだけ、PHP GD切り出し画像で3回目の再確認を行う。
+     * 座標が無い項目は実行しないため、初見テンプレートでも無駄な処理時間を増やさない。
+     *
+     * @param array<string,string> $unresolved
+     * @param array<string,mixed> $normalized
+     * @param array<string,mixed> $ocrStructured
+     * @return array<string,mixed>
+     */
+    private function repairUnresolvedWithCrops(
+        OpenAiPrescriptionClient $client,
+        string $imagePath,
+        string $mimeType,
+        array $normalized,
+        array $unresolved,
+        array $ocrStructured = []
+    ): array {
+        $result = [
+            'enabled' => true,
+            'executed' => false,
+            'attempt_no' => 3,
+            'items' => [],
+            'skipped' => [],
+        ];
+
+        $cropper = new PrescriptionFieldCropService();
+        $max = max(1, (int)app_config('prescription_field_crop.max_fields_per_job', 4));
+        $count = 0;
+        foreach (array_keys($unresolved) as $fieldKey) {
+            if ($count >= $max) {
+                $result['skipped'][] = ['field_key' => $fieldKey, 'reason' => 'max_fields_per_job'];
+                continue;
+            }
+            $target = [
+                'field_key' => $fieldKey,
+                'field_label' => self::REPAIRABLE_FIELD_LABELS[$fieldKey] ?? $fieldKey,
+                'current_value' => (string)$this->getPath($normalized, $fieldKey),
+                'validation_status' => 'ng',
+                'validation_reason' => 'attempt_2_unresolved',
+                'needs_human_check' => true,
+                'normalized_candidate' => '',
+            ];
+            $crop = $cropper->cropForField($imagePath, $mimeType, $fieldKey, $this->cropContext($normalized, $ocrStructured));
+            if (!$crop) {
+                $result['skipped'][] = ['field_key' => $fieldKey, 'reason' => 'approved_region_not_found'];
+                continue;
+            }
+
+            try {
+                $repair = $client->repairCoreFieldsFromImage((string)$crop['path'], (string)$crop['mime_type'], $normalized, [$target], $ocrStructured);
+                $normalized = $this->mergeRepairFields($normalized, is_array($repair['fields'] ?? null) ? $repair['fields'] : []);
+                $result['executed'] = true;
+                $result['items'][] = [
+                    'field_key' => $fieldKey,
+                    'crop' => [
+                        'path' => (string)($crop['path'] ?? ''),
+                        'sha256' => (string)($crop['sha256'] ?? ''),
+                        'width' => (int)($crop['width'] ?? 0),
+                        'height' => (int)($crop['height'] ?? 0),
+                        'region' => $crop['region'] ?? null,
+                    ],
+                    'returned_fields' => $repair['fields'] ?? [],
+                    'warnings' => $repair['warnings'] ?? [],
+                    'model' => (string)($repair['model'] ?? ''),
+                ];
+                $count++;
+            } catch (Throwable $e) {
+                $result['items'][] = [
+                    'field_key' => $fieldKey,
+                    'crop' => [
+                        'path' => (string)($crop['path'] ?? ''),
+                        'sha256' => (string)($crop['sha256'] ?? ''),
+                    ],
+                    'error' => $e->getMessage(),
+                ];
+            }
+        }
+        $result['normalized'] = $normalized;
+        return $result;
+    }
+
+    /** @param array<string,mixed> $normalized @param array<string,mixed> $ocrStructured @return array<string,mixed> */
+    private function cropContext(array $normalized, array $ocrStructured): array
+    {
+        $repair = is_array($normalized['_auto_field_repair'] ?? null) ? $normalized['_auto_field_repair'] : [];
+        return [
+            'template_hash' => (string)($normalized['_template_hash'] ?? $normalized['_layout_fingerprint'] ?? ''),
+            'layout_fingerprint' => (string)($normalized['_layout_fingerprint'] ?? $normalized['layout_fingerprint'] ?? ''),
+            'line_signature' => (string)($normalized['_line_signature'] ?? ''),
+            'label_signature' => (string)($normalized['_label_signature'] ?? ''),
+            'repair' => $repair,
+            'ocr_overall_confidence' => $ocrStructured['overall_confidence'] ?? null,
+        ];
     }
 
     /** @param array<string,mixed> $normalized @return array<int,array<string,mixed>> */
