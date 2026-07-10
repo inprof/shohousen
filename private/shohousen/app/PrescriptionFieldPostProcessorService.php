@@ -217,6 +217,22 @@ final class PrescriptionFieldPostProcessorService
         return implode(' ', array_values(array_unique($out)));
     }
 
+    /** @param array<string,mixed> $med */
+    private function isNonTabletOrFlexibleMedication(array $med): bool
+    {
+        $text = implode(' ', array_map(static fn($v): string => trim((string)$v), [
+            $med['drug_name'] ?? '',
+            $med['raw_drug_text'] ?? '',
+            $med['dose_text'] ?? '',
+            $med['usage_text'] ?? '',
+            $med['amount_text'] ?? '',
+        ]));
+        if ($text === '') {
+            return false;
+        }
+        return preg_match('/(g|ｇ|グラム|mL|ml|ｍＬ|枚|本|瓶|袋|包|滴|軟膏|クリーム|ローション|外用|塗布|塗擦|貼付|点眼|点耳|噴霧|吸入|うがい|含嗽|頭|頭部|患部|乾燥部位|右眼|左眼|両眼|頓服|必要時|疼痛時|発熱時|1\s*[〜～~－-]\s*2|１\s*[〜～~－-]\s*２|適宜|症状時)/iu', $text) === 1;
+    }
+
     /** @param array<string,mixed> $normalized @return array<int,array<string,mixed>> */
     private function buildValidations(array $normalized): array
     {
@@ -250,15 +266,46 @@ final class PrescriptionFieldPostProcessorService
             }
             $n = $i + 1;
             $drug = trim((string)($med['drug_name'] ?? ''));
+            $raw = trim((string)($med['raw_drug_text'] ?? ''));
+            $generic = trim((string)($med['generic_name'] ?? ''));
+            $brand = trim((string)($med['brand_name'] ?? ''));
+            $usage = trim((string)($med['usage_text'] ?? ''));
+            $dose = trim((string)($med['dose_text'] ?? ''));
+            $days = trim((string)($med['days_count'] ?? ''));
+            $amount = trim((string)($med['amount_text'] ?? ''));
+            $identity = $drug !== '' ? $drug : ($raw !== '' ? $raw : ($brand !== '' ? $brand : $generic));
             $dictScore = (float)($med['_drug_dictionary_score'] ?? 0.0);
-            if ($drug === '') {
-                $v[] = $this->validation('medications.' . $n . '.drug_name', '処方' . $n . ' 薬品名', '', 'ng', 0, true, '薬品名が空欄です。', 130 + $n);
+
+            if ($identity === '') {
+                $v[] = $this->validation('medications.' . $n . '.drug_name', '処方' . $n . ' 薬品名', '', 'ng', 0, true, '薬品名または処方箋上の表記が空欄です。薬剤行として保存できません。', 130 + $n, true);
+                continue;
+            }
+
+            if ($drug === '' && $raw !== '') {
+                $v[] = $this->validation('medications.' . $n . '.drug_name', '処方' . $n . ' 薬品名', $raw, 'review', 55, true, '薬品名に分解できていませんが、処方箋上の表記があるため要確認として保存できます。', 130 + $n, false);
             } elseif ($dictScore >= 95.0) {
-                $v[] = $this->validation('medications.' . $n . '.drug_name', '処方' . $n . ' 薬品名', $drug, 'ok', 95, false, '薬品辞書に高一致候補があります。', 130 + $n);
+                $v[] = $this->validation('medications.' . $n . '.drug_name', '処方' . $n . ' 薬品名', $drug, 'ok', 95, false, '薬品辞書に高一致候補があります。', 130 + $n, false);
             } elseif ($dictScore >= 78.0) {
-                $v[] = $this->validation('medications.' . $n . '.drug_name', '処方' . $n . ' 薬品名', $drug, 'review', 75, true, '薬品辞書に候補はありますが自動確定せず確認してください。', 130 + $n);
+                $v[] = $this->validation('medications.' . $n . '.drug_name', '処方' . $n . ' 薬品名', $drug, 'review', 75, true, '薬品辞書に候補はありますが自動確定せず確認してください。', 130 + $n, false);
             } else {
-                $v[] = $this->validation('medications.' . $n . '.drug_name', '処方' . $n . ' 薬品名', $drug, 'review', 45, true, '薬品辞書に十分一致する候補がありません。', 130 + $n);
+                $v[] = $this->validation('medications.' . $n . '.drug_name', '処方' . $n . ' 薬品名', $drug, 'review', 45, true, '薬品辞書に十分一致する候補がありません。薬局側確認で確定してください。', 130 + $n, false);
+            }
+
+            $hasStandardUsage = $usage !== '';
+            $hasQuantityContext = $dose !== '' || $days !== '' || $amount !== '';
+            if (!$hasStandardUsage || !$hasQuantityContext || $this->isNonTabletOrFlexibleMedication($med)) {
+                $parts = [];
+                if (!$hasStandardUsage) {
+                    $parts[] = '用法未分解';
+                }
+                if (!$hasQuantityContext) {
+                    $parts[] = '用量/日数/総量未分解';
+                }
+                if ($this->isNonTabletOrFlexibleMedication($med)) {
+                    $parts[] = '外用薬・頓服・幅指定など標準形式外';
+                }
+                $reason = '薬剤情報は処方箋上の表記を優先します。' . implode('、', array_values(array_unique($parts))) . 'のため要確認です。';
+                $v[] = $this->validation('medications.' . $n . '.structure', '処方' . $n . ' 用法/総量分解', trim(implode(' ', array_filter([$dose, $usage, $days !== '' ? $days . '日' : '', $amount, $raw]))), 'review', 65, true, $reason, 180 + $n, false);
             }
         }
 

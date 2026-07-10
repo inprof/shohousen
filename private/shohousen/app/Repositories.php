@@ -579,21 +579,23 @@ function assert_prescription_post_ready_for_qr(array $post): void
     $hasDrug = false;
     foreach ($drugNames as $i => $drugName) {
         $name = trim((string)$drugName);
+        $raw = trim((string)($post['raw_drug_text'][$i] ?? ''));
+        $generic = trim((string)($post['generic_name'][$i] ?? ''));
+        $brand = trim((string)($post['brand_name'][$i] ?? ''));
         $usage = trim((string)($post['usage_text'][$i] ?? ''));
+        $dose = trim((string)($post['dose_text'][$i] ?? ''));
         $days = trim((string)($post['days_count'][$i] ?? ''));
         $amount = trim((string)($post['amount_text'][$i] ?? ''));
-        if ($name === '' && $usage === '' && $days === '' && $amount === '') {
+        if ($name === '' && $raw === '' && $generic === '' && $brand === '' && $usage === '' && $dose === '' && $days === '' && $amount === '') {
             continue;
         }
         $hasDrug = true;
-        if ($name === '') {
-            $errors[] = '判定不能: 処方' . (string)($i + 1) . 'の薬品名が空欄です。';
-        }
-        if ($usage === '') {
-            $errors[] = '判定不能: 処方' . (string)($i + 1) . 'の用法が空欄です。';
-        }
-        if ($days === '' && $amount === '') {
-            $errors[] = '判定不能: 処方' . (string)($i + 1) . 'の日数または総量が空欄です。';
+
+        // 外用薬・頓服・用量幅ありの処方では「錠数×用法×期間」に分解できないことがある。
+        // そのため、用法/日数/総量の未分解はDB保存を止めず、画面・ルール判定側で要確認にする。
+        // ただし、薬品名として使える文字列も処方箋上の原文もない行は保存できないためブロックする。
+        if ($name === '' && $raw === '' && $generic === '' && $brand === '') {
+            $errors[] = '判定不能: 処方' . (string)($i + 1) . 'の薬品名または処方箋上の表記が空欄です。';
         }
     }
     if (!$hasDrug) {
@@ -682,7 +684,9 @@ function create_prescription_from_post(array $user, array $post): int
                 continue;
             }
             if ($drugName === '') {
-                $drugName = $brandName !== '' ? $brandName : $genericName;
+                $fallbackDrugName = $brandName !== '' ? $brandName : ($genericName !== '' ? $genericName : $rawDrugText);
+                $fallbackDrugName = trim((string)(preg_split('/\R/u', $fallbackDrugName)[0] ?? $fallbackDrugName));
+                $drugName = mb_substr($fallbackDrugName, 0, 255);
             }
             $days = (int)($daysCounts[$i] ?? 0);
             $doseText = trim((string)($doseTexts[$i] ?? ''));
@@ -708,7 +712,7 @@ function create_prescription_from_post(array $user, array $post): int
                 ':days_count' => $days ?: null,
                 ':amount_text' => $currentAmountText !== '' ? $currentAmountText : ($days ? $days . '日分' : null),
                 ':stock_status' => in_array($status, ['adopted','in_stock','low_stock','not_stocked','unknown'], true) ? $status : 'unknown',
-                ':needs_check' => $status === 'low_stock' ? 1 : 0,
+                ':needs_check' => ($status === 'low_stock' || $usageText === '' || ($doseText === '' && $days === 0 && $currentAmountText === '')) ? 1 : 0,
             ];
             foreach ($medOptionalColumns as $column) {
                 $params[':' . $column] = match ($column) {

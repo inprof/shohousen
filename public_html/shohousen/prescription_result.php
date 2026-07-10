@@ -384,6 +384,61 @@ function medication_visible_support_value(array $med, string $key): string
     return '';
 }
 
+/** @return array{status:string,class:string,label:string,message:string} */
+function medication_review_state(array $med): array
+{
+    $drug = trim((string)($med['drug_name'] ?? ''));
+    $raw = trim((string)($med['raw_drug_text'] ?? ''));
+    $generic = trim((string)($med['generic_name'] ?? ''));
+    $brand = trim((string)($med['brand_name'] ?? ''));
+    $usage = trim((string)($med['usage_text'] ?? ''));
+    $dose = trim((string)($med['dose_text'] ?? ''));
+    $days = trim((string)($med['days_count'] ?? ''));
+    $amount = trim((string)($med['amount_text'] ?? ''));
+    $identity = $drug !== '' ? $drug : ($raw !== '' ? $raw : ($brand !== '' ? $brand : $generic));
+
+    if ($identity === '') {
+        return [
+            'status' => 'missing',
+            'class' => 'med-row-required-missing validation-missing',
+            'label' => '必須未入力',
+            'message' => '薬品名または処方箋上の表記が未入力です。',
+        ];
+    }
+
+    $text = implode(' ', [$drug, $raw, $usage, $dose, $amount]);
+    $isFlexible = preg_match('/(g|ｇ|グラム|mL|ml|ｍＬ|枚|本|瓶|袋|包|滴|軟膏|クリーム|ローション|外用|塗布|塗擦|貼付|点眼|点耳|噴霧|吸入|うがい|含嗽|頭|頭部|患部|乾燥部位|右眼|左眼|両眼|頓服|必要時|疼痛時|発熱時|1\s*[〜～~－-]\s*2|１\s*[〜～~－-]\s*２|適宜|症状時)/iu', $text) === 1;
+    $missingParts = [];
+    if ($drug === '' && $raw !== '') {
+        $missingParts[] = '薬品名未分解';
+    }
+    if ($usage === '') {
+        $missingParts[] = '用法未分解';
+    }
+    if ($dose === '' && $days === '' && $amount === '') {
+        $missingParts[] = '用量/日数/総量未分解';
+    }
+    if ($isFlexible) {
+        $missingParts[] = '外用薬・頓服・幅指定など標準形式外';
+    }
+
+    if ($missingParts) {
+        return [
+            'status' => 'review',
+            'class' => 'med-row-review validation-review',
+            'label' => '要確認',
+            'message' => implode('、', array_values(array_unique($missingParts))) . '。処方箋上の表記を優先して確認してください。',
+        ];
+    }
+
+    return [
+        'status' => 'ok',
+        'class' => 'med-row-ok',
+        'label' => '問題なし',
+        'message' => '',
+    ];
+}
+
 function render_dynamic_value_control(string $name, string $value, string $uiTemplate, string $valueType, string $fieldKey): string
 {
     $uiTemplate = in_array($uiTemplate, ['input','textarea','date','number','select','checkbox','drug_line','blank_cell','unknown'], true) ? $uiTemplate : 'input';
@@ -915,8 +970,9 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       if (!empty($amountCalc['amount_text']) && class_exists('MedicationDosageCalculator') && MedicationDosageCalculator::shouldReplaceAmountText($displayAmount, (string)$amountCalc['amount_text'])) {
           $displayAmount = (string)$amountCalc['amount_text'];
       }
+      $medState = medication_review_state($med);
     ?>
-      <div class="edit-med-row ocr-med-row" data-med-row>
+      <div class="edit-med-row ocr-med-row <?= h($medState['class']) ?>" data-med-row data-med-review-status="<?= h($medState['status']) ?>">
         <span class="row-no"><?= $i + 1 ?></span>
         <label class="med-field-main">薬品名（代表名）
           <textarea name="drug_name[]" rows="2" list="drugCandidates<?= $i ?>" placeholder="保存する代表薬品名"><?= h((string)($med['drug_name'] ?? '')) ?></textarea>
@@ -946,6 +1002,10 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
             <?php endforeach; ?>
           </select>
         </label>
+        <div class="med-review-message" data-med-review-message>
+          <?php if ($medState['status'] === 'missing'): ?><span class="required-missing-badge"><?= h($medState['label']) ?></span><?php elseif ($medState['status'] === 'review'): ?><span class="review-badge"><?= h($medState['label']) ?></span><?php endif; ?>
+          <?php if ($medState['message'] !== ''): ?><span><?= h($medState['message']) ?></span><?php endif; ?>
+        </div>
         <?php $rel = (string)($med['name_relation'] ?? 'unknown'); ?>
         <input type="hidden" name="drug_name_relation_type[]" value="<?= h(in_array($rel, ['single','generic_brand_pair','multiple_candidates','unknown'], true) ? $rel : 'unknown') ?>">
         <input type="hidden" name="ai_drug_name[]" value="<?= h((string)($med['drug_name'] ?? '')) ?>">
@@ -972,6 +1032,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       <label>日数<input type="number" name="days_count[]" value="" data-med-days></label>
       <label>総量/備考<input name="amount_text[]" value="" data-med-amount data-auto-amount="0"><small class="calculated-amount-help" data-amount-rule-note></small></label>
       <label>在庫<select name="stock_status[]"><option value="unknown" selected>未確認</option><option value="adopted">採用薬</option><option value="in_stock">在庫あり</option><option value="low_stock">在庫僅少</option><option value="not_stocked">未採用</option></select></label>
+      <div class="med-review-message" data-med-review-message><span class="required-missing-badge">必須未入力</span><span>薬品名または処方箋上の表記を入力してください。</span></div>
       <input type="hidden" name="drug_name_relation_type[]" value="unknown">
       <input type="hidden" name="ai_drug_name[]" value="">
       <input type="hidden" name="ai_generic_name[]" value="">
@@ -1586,30 +1647,39 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     var hasMedication = false;
     document.querySelectorAll('[data-med-list] .ocr-med-row').forEach(function (row, index) {
       var drug = row.querySelector('[name="drug_name[]"]');
+      var raw = row.querySelector('[name="raw_drug_text[]"]');
+      var generic = row.querySelector('[name="generic_name[]"]');
+      var brand = row.querySelector('[name="brand_name[]"]');
+      var dose = row.querySelector('[name="dose_text[]"]');
       var usage = row.querySelector('[name="usage_text[]"]');
       var days = row.querySelector('[name="days_count[]"]');
       var amount = row.querySelector('[name="amount_text[]"]');
       var drugValue = String(drug?.value || '').trim();
+      var rawValue = String(raw?.value || '').trim();
+      var genericValue = String(generic?.value || '').trim();
+      var brandValue = String(brand?.value || '').trim();
+      var doseValue = String(dose?.value || '').trim();
       var usageValue = String(usage?.value || '').trim();
       var daysValue = String(days?.value || '').trim();
       var amountValue = String(amount?.value || '').trim();
-      if (!drugValue && !usageValue && !daysValue && !amountValue) return;
+      if (!drugValue && !rawValue && !genericValue && !brandValue && !doseValue && !usageValue && !daysValue && !amountValue) return;
       hasMedication = true;
-      if (!drugValue) {
-        var drugMessage = '処方' + (index + 1) + 'の薬品名が未入力です。';
+      if (!drugValue && !rawValue && !genericValue && !brandValue) {
+        var drugMessage = '処方' + (index + 1) + 'の薬品名または処方箋上の表記が未入力です。';
         messages.push(drugMessage);
-        markControlInvalid(drug, drugMessage);
+        markControlInvalid(drug || raw, drugMessage);
+        return;
+      }
+      if (!drugValue && rawValue) {
+        markControlReview(drug, '処方' + (index + 1) + 'は薬品名に分解できていませんが、処方箋上の表記があるため要確認として保存します。');
       }
       if (!usageValue) {
-        var usageMessage = '処方' + (index + 1) + 'の用法が未入力です。';
-        messages.push(usageMessage);
-        markControlInvalid(usage, usageMessage);
+        markControlReview(usage, '処方' + (index + 1) + 'の用法が未分解です。処方箋上の表記を確認してください。');
       }
-      if (!daysValue && !amountValue) {
-        var daysMessage = '処方' + (index + 1) + 'の日数または総量が未入力です。';
-        messages.push(daysMessage);
-        markControlInvalid(days, daysMessage);
-        markControlInvalid(amount, daysMessage);
+      if (!doseValue && !daysValue && !amountValue) {
+        var reviewMessage = '処方' + (index + 1) + 'の用量/日数/総量が未分解です。外用薬・頓服などは要確認として保存します。';
+        markControlReview(days, reviewMessage);
+        markControlReview(amount, reviewMessage);
       }
     });
     if (!hasMedication) {

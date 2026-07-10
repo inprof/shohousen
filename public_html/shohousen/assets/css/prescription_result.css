@@ -515,3 +515,55 @@ select.validation-missing {
   background: #fffdf3;
   box-shadow: 0 0 0 3px rgba(245, 158, 11, .14);
 }
+
+/* 処方薬カードの状態色: 薬品名/原文なし=薄赤、分解不能/外用薬等=黄、問題なし=白 */
+.ocr-med-row.med-row-ok {
+  border-color: var(--line);
+  background: #fff;
+}
+.ocr-med-row.med-row-required-missing {
+  border-color: #fca5a5;
+  background: #fff1f2;
+  box-shadow: inset 4px 0 0 #f87171;
+}
+.ocr-med-row.med-row-review {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  box-shadow: inset 4px 0 0 #f59e0b;
+}
+.ocr-med-row.med-row-required-missing textarea,
+.ocr-med-row.med-row-required-missing input,
+.ocr-med-row.med-row-required-missing select {
+  border-color: #fca5a5;
+  background: #fff7f7;
+}
+.ocr-med-row.med-row-review textarea,
+.ocr-med-row.med-row-review input,
+.ocr-med-row.med-row-review select {
+  border-color: #fbbf24;
+  background: #fffdf3;
+}
+.med-review-message {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: #92400e;
+}
+.med-review-message .required-missing-badge,
+.med-review-message .review-badge {
+  display: inline-block;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+.med-review-message .required-missing-badge {
+  background: #fee2e2;
+  color: #b91c1c;
+}
+.med-review-message .review-badge {
+  background: #fef3c7;
+  color: #92400e;
+}
