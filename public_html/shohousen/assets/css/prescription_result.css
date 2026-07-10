@@ -142,9 +142,18 @@
   resize: vertical;
 }
 .edit-med-row .med-field-main,
-.edit-med-row .med-field-raw {
+.edit-med-row .med-field-raw,
+.edit-med-row .med-field-support {
   grid-column: span 2;
 }
+
+.edit-med-row .med-field-support textarea {
+  min-height: 58px;
+}
+.edit-med-row .med-field-support {
+  color: var(--text);
+}
+
 .med-delete-button {
   grid-column: span 2;
   border-color: #fecaca;
@@ -157,7 +166,16 @@
 @media (max-width: 700px) {
   .edit-med-row .med-field-main,
   .edit-med-row .med-field-raw,
-  .med-delete-button {
+  .edit-med-row .med-field-support,
+  
+.edit-med-row .med-field-support textarea {
+  min-height: 58px;
+}
+.edit-med-row .med-field-support {
+  color: var(--text);
+}
+
+.med-delete-button {
     grid-column: span 1;
   }
 }

@@ -640,6 +640,8 @@ PROMPT;
 - 出力は必ず指定JSON Schemaに従ってください。
 - 読めない値、複数候補、OCRが怪しい値は空欄または needs_human_check=true にしてください。
 - 薬品名・用量・用法・日数・総量は medications 配列に集約してください。
+- medications の順序は、処方欄に印字されている上から下、左から右の順番を厳守してください。薬効や重要度で並べ替えないでください。
+- 外用薬・点眼薬・頓服等で「頭に」「乾燥部位に」「患部に」「右眼に」などの使用部位・使用条件が書かれている場合は不要扱いせず、usage_textに原文順で含めてください。
 - 帳票上に存在する項目は form_fields に残してください。ただし薬品名元テキスト・辞書候補・推定候補などの補助学習専用データは form_fields に出さないでください。
 - 保険者番号は6桁または8桁、公費負担者番号は8桁、公費受給者番号は7桁、医療機関コードは通常7桁として扱ってください。条件に合わない場合は needs_human_check=true にしてください。
 {$template}{$learningHints}
@@ -657,25 +659,26 @@ PROMPT;
 医療情報のため、不明点は推測で埋めず、空欄・null・needs_human_check=trueで返してください。
 患者情報、保険情報、医療機関情報、処方薬情報を抽出します。
 処方箋の様式は医療機関・拠点ごとに異なるため、固定テンプレートだけに寄せず、画像内に見える項目名と値をできる限り form_fields に列挙してください。
-form_fields には、空欄でも帳票上に存在する主要項目を入れてください。例: 公費負担者番号、公費負担医療の受給者番号、保険者番号、被保険者証の記号番号、患者氏名、フリガナ、生年月日、性別、区分、交付年月日、処方箋使用期間、医療機関所在地、医療機関名、電話番号、保険医氏名、都道府県番号、点数表番号、医療機関コード、備考、保険医署名、記名押印、変更不可（医療上必要）、後発品変更不可、患者希望、先発医薬品患者希望、QR有無など。
+form_fields には、空欄でも帳票上に存在する主要項目を入れてください。例: 公費負担者番号、公費負担医療の受給者番号、保険者番号、被保険者証の記号番号、患者氏名、フリガナ/ふりがな/カナ/かな、生年月日、性別、区分、交付年月日、処方箋使用期間、医療機関所在地、医療機関名、電話番号、保険医氏名、都道府県番号、点数表番号、医療機関コード、備考、保険医署名、記名押印、変更不可（医療上必要）、後発品変更不可、患者希望、先発医薬品患者希望、QR有無など。
 薬品名・用量・用法・日数・総量は form_fields に重複出力せず、medications 配列に集約してください。画面側では medications の処方薬カードで修正・DB保存します。
 ただし、画像上に実際に書かれていない一般名候補・商品名候補・薬品名元テキスト・辞書候補・推定候補は、form_fieldsには出さないでください。これらは画面表示項目ではなく、medications内または後処理辞書の補助データとして扱います。
 画面側では field_group と value_type を見て、form_fields から修正用の入力一覧を動的に生成します。画像内に見える項目は、固定項目に入らなくても form_fields に残してください。
 source_section には、上部左、上部右、患者欄、保険欄、医療機関欄、処方欄、備考欄、下部QRなど、帳票上の位置が分かる表現を入れてください。これは拠点別レイアウト学習に使います。
 出力に使うかどうかは人間が後で選択するため、include_default は「通常出力に使いそうな項目」だけ true にし、それ以外も form_fields には残してください。
 出力は必ず指定JSON Schemaに従い、余計な文章を含めないでください。
-数字、日付、薬品名、用法、日数は特に慎重に扱ってください。用法は、1回量（錠/包/カプセル/mL/mg/g等）、服薬回数（1日N回、分N、毎食後、朝夕、就寝前等）、日数を分離して読んでください。総量は 1回量×服薬回数/日×日数 で判断できる場合のみ amount_text に入れ、判断できない場合は空欄またはneeds_human_check=trueにしてください。薬品名中の5mg/0.05mgなどは規格量の可能性が高いため、総量として扱わないでください。
+数字、日付、薬品名、用法、日数は特に慎重に扱ってください。用法は、1回量（錠/包/カプセル/mL/mg/g等）、服薬回数（1日N回、分N、毎食後、朝夕、就寝前等）、日数に加えて、外用の使用部位・投与経路・条件（例: 頭に、乾燥部位に、患部に、右眼に、疼痛時）も省略せず原文順で読んでください。総量は 1回量×服薬回数/日×日数 で判断できる場合のみ amount_text に入れ、判断できない場合は空欄またはneeds_human_check=trueにしてください。薬品名中の5mg/0.05mgなどは規格量の可能性が高いため、総量として扱わないでください。
 日付は西暦4桁または和暦（明治/大正/昭和/平成/令和、M/T/S/H/R）を認識してください。2桁年だけの場合は西暦・和暦を推測で確定せずneeds_human_check=trueにしてください。
 保険者番号は6桁または8桁のみです。10桁などで読めた場合は、別欄の番号を混ぜている可能性が高いため、保険者番号として確定せずneeds_human_check=trueにしてください。
 公費負担者番号は8桁、公費負担医療の受給者番号は7桁です。医療機関等コードは通常7桁、都道府県番号+点数表番号付きなら10桁候補として扱ってください。
 薬品名や用法が読みにくい場合はneeds_human_check=trueにしてください。
 手書き、薄い印字、小さい文字、ぼけ、にじみ、影、罫線被り、低解像度で読みにくい箇所は、推測で確定せずreasonへ「手書き疑い」「薄い印字」「ぼけ」「にじみ」「小さい文字」などの視覚的理由を短く残してください。これは文字品質の補助学習に使います。
 印字と手書きが混在する場合、手書きらしい値は信頼度を下げ、候補として残しneeds_human_check=trueにしてください。
-処方箋受付ルール判定のため、「変更不可（医療上必要）」「後発品変更不可」「患者希望」「保険医署名」「記名押印」は、見える場合必ずform_fieldsへ入れてください。チェック欄はvalue_type=booleanにし、チェックありなら「有」、チェックなし/空欄なら空文字にしてください。変更不可欄と患者希望欄が同時に見える場合も、推測で片方を消さず、読めたまま返してください。
+処方箋受付ルール判定のため、「変更不可（医療上必要）」「後発品変更不可」「患者希望」「保険医署名」「記名押印」は、見える場合必ずform_fieldsへ入れてください。チェック欄はvalue_type=booleanにし、チェックありなら「有」、チェックなし/空欄なら「無」にしてください。変更不可欄と患者希望欄が同時に見える場合も、推測で片方を消さず、読めたまま返してください。
 薬品名については、一般名・商品名・販売名・後発品名・先発品名・屋号違いをできるだけ区別してください。
 同じ処方ブロック内に商品名と一般名が併記されている場合は、別薬として分けず、原則1つのmedications要素にまとめてください。
 その場合、drug_nameには薬局で表示・保存したい代表名を入れてください。generic_nameとbrand_nameは画像内に明確に書かれている場合だけ入れ、辞書照合で推定しただけなら空文字にしてください。raw_drug_textは補助学習用なので、画面表示用のform_fieldsには出さず、medications内だけに保持してください。
 同一薬か別薬か判断できない場合は、分けてもよいですが name_relation="multiple_candidates" とし、needs_human_check=trueにしてください。
+処方薬のraw_drug_textには、薬品名だけでなく処方欄に見える用法・使用部位・備考行を、印字の並び順どおり改行で保持してください。
 {$template}{$learningHints}
 PROMPT;
     }
@@ -929,9 +932,16 @@ PROMPT;
             $genericName = trim((string)($med['generic_name'] ?? ''));
             $brandName = trim((string)($med['brand_name'] ?? ''));
             $rawDrugText = trim((string)($med['raw_drug_text'] ?? ''));
+            $doseText = trim((string)($med['dose_text'] ?? ''));
+            $usageText = trim((string)($med['usage_text'] ?? ''));
+            $amountText = trim((string)($med['amount_text'] ?? ''));
             if ($rawDrugText === '') {
                 $rawDrugText = implode("
-", array_values(array_filter([$drugName, $genericName, $brandName], static fn($v) => trim((string)$v) !== '')));
+", array_values(array_filter([$drugName, $genericName, $brandName, $doseText, $usageText, $amountText], static fn($v) => trim((string)$v) !== '')));
+            }
+            $usageSupplement = self::extractMedicationUsageSupplement($rawDrugText, $drugName, $usageText);
+            if ($usageSupplement !== '') {
+                $usageText = self::appendUniqueMedicationText($usageText, $usageSupplement);
             }
             $out[] = [
                 'drug_name' => $drugName,
@@ -939,16 +949,56 @@ PROMPT;
                 'brand_name' => $brandName,
                 'raw_drug_text' => $rawDrugText,
                 'name_relation' => $relation,
-                'dose_text' => (string)($med['dose_text'] ?? ''),
-                'usage_text' => (string)($med['usage_text'] ?? ''),
+                'dose_text' => $doseText,
+                'usage_text' => $usageText,
                 'days_count' => is_numeric($med['days_count'] ?? null) ? (int)$med['days_count'] : null,
-                'amount_text' => (string)($med['amount_text'] ?? ''),
+                'amount_text' => $amountText,
                 'confidence' => self::normalizeConfidencePercent($med['confidence'] ?? 0.0),
                 'needs_human_check' => (bool)($med['needs_human_check'] ?? true),
                 'reason' => (string)($med['reason'] ?? ''),
             ];
         }
         return $out;
+    }
+
+    private static function appendUniqueMedicationText(string $base, string $addition): string
+    {
+        $base = trim($base);
+        $addition = trim($addition);
+        if ($base === '' || $addition === '') {
+            return $base !== '' ? $base : $addition;
+        }
+        $baseCompact = preg_replace('/\s+/u', '', $base) ?? $base;
+        $additionCompact = preg_replace('/\s+/u', '', $addition) ?? $addition;
+        if ($additionCompact !== '' && str_contains($baseCompact, $additionCompact)) {
+            return $base;
+        }
+        return $base . ' ' . $addition;
+    }
+
+    private static function extractMedicationUsageSupplement(string $rawDrugText, string $drugName, string $currentUsage): string
+    {
+        $lines = preg_split('/\R+/u', trim($rawDrugText)) ?: [];
+        $out = [];
+        $drugCompact = preg_replace('/\s+/u', '', $drugName) ?? $drugName;
+        $usageCompact = preg_replace('/\s+/u', '', $currentUsage) ?? $currentUsage;
+        foreach ($lines as $line) {
+            $line = trim((string)$line);
+            if ($line === '') {
+                continue;
+            }
+            $lineCompact = preg_replace('/\s+/u', '', $line) ?? $line;
+            if ($drugCompact !== '' && $lineCompact === $drugCompact) {
+                continue;
+            }
+            if ($usageCompact !== '' && str_contains($usageCompact, $lineCompact)) {
+                continue;
+            }
+            if (preg_match('/(頭|頭部|額|顔|頬|口唇|首|胸|腹|背|腕|手|指|足|脚|陰部|患部|乾燥部位|かゆい所|湿疹部位|外用部位|右眼|左眼|両眼|鼻|耳|口腔|舌下|部位|塗布|塗擦|貼付|点眼|点耳|噴霧|吸入|うがい|含嗽|1\s*日|１\s*日|1\s*回|１\s*回|分\s*\d+|毎食|朝|昼|夕|就寝|寝る前|食前|食後|頓服|必要時|疼痛時)/u', $line)) {
+                $out[] = $line;
+            }
+        }
+        return implode(' ', array_values(array_unique($out)));
     }
 
     /** @return array<int,array<string,mixed>> */
@@ -968,7 +1018,7 @@ PROMPT;
 
         $auto = [
             ['patient_name', '氏名', 'patient', (string)($normalized['patient']['name'] ?? ''), 'person_name', '患者欄', $normalized['patient']['confidence'] ?? 0, true],
-            ['patient_kana', 'フリガナ', 'patient', (string)($normalized['patient']['kana'] ?? ''), 'text', '患者欄', $normalized['patient']['confidence'] ?? 0, false],
+            ['patient_kana', 'フリガナ/ふりがな', 'patient', (string)($normalized['patient']['kana'] ?? ''), 'text', '患者欄', $normalized['patient']['confidence'] ?? 0, false],
             ['patient_birth_date', '生年月日', 'patient', (string)($normalized['patient']['birth_date'] ?? ''), 'date', '患者欄', $normalized['patient']['confidence'] ?? 0, true],
             ['patient_gender', '性別', 'patient', (string)($normalized['patient']['gender'] ?? ''), 'text', '患者欄', $normalized['patient']['confidence'] ?? 0, true],
             ['insurance_no', '保険者番号', 'insurance', (string)($normalized['insurance']['insurance_no'] ?? ''), 'code', '保険欄', $normalized['insurance']['confidence'] ?? 0, true],

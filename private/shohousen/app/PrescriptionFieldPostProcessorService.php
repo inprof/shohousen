@@ -45,6 +45,7 @@ final class PrescriptionFieldPostProcessorService
         $normalized['public_expense'] = is_array($normalized['public_expense'] ?? null) ? $normalized['public_expense'] : [];
         $normalized['substitution'] = is_array($normalized['substitution'] ?? null) ? $normalized['substitution'] : [];
         $normalized['medical_institution'] = is_array($normalized['medical_institution'] ?? null) ? $normalized['medical_institution'] : [];
+        $normalized['patient'] = is_array($normalized['patient'] ?? null) ? $normalized['patient'] : [];
         $normalized['insurance'] = is_array($normalized['insurance'] ?? null) ? $normalized['insurance'] : [];
         $normalized['prescription'] = is_array($normalized['prescription'] ?? null) ? $normalized['prescription'] : [];
 
@@ -54,6 +55,7 @@ final class PrescriptionFieldPostProcessorService
             }
         };
 
+        $assignIfEmpty($normalized['patient'], 'kana', $this->findFieldValue($fields, ['フリガナ', 'ふりがな', 'ふり仮名', 'カナ', 'かな']));
         $assignIfEmpty($normalized['public_expense'], 'payer_no', $this->findFieldValue($fields, ['公費負担者番号', '公費負担番号', '公費負担者']));
         $assignIfEmpty($normalized['public_expense'], 'beneficiary_no', $this->findFieldValue($fields, ['公費負担医療の受給者番号', '受給者番号', '公費受給者番号']));
         $assignIfEmpty($normalized['insurance'], 'insured_symbol_number', $this->findFieldValue($fields, ['被保険者証', '記号・番号', '記号番号', '被保険者手帳']));
@@ -137,52 +139,82 @@ final class PrescriptionFieldPostProcessorService
     private function enrichMedications(array $normalized): array
     {
         $meds = [];
-        foreach ((array)($normalized['medications'] ?? []) as $i => $med) {
+        foreach ((array)($normalized['medications'] ?? []) as $med) {
             if (!is_array($med)) {
                 continue;
             }
-            $text = implode("\n", array_values(array_filter([
-                (string)($med['raw_drug_text'] ?? ''),
-                (string)($med['drug_name'] ?? ''),
-                (string)($med['generic_name'] ?? ''),
-                (string)($med['brand_name'] ?? ''),
-            ], static fn(string $v): bool => trim($v) !== '')));
+            $drugName = trim((string)($med['drug_name'] ?? ''));
+            $genericName = trim((string)($med['generic_name'] ?? ''));
+            $brandName = trim((string)($med['brand_name'] ?? ''));
+            $rawDrugText = trim((string)($med['raw_drug_text'] ?? ''));
+            $doseText = trim((string)($med['dose_text'] ?? ''));
+            $usageText = trim((string)($med['usage_text'] ?? ''));
+            $amountText = trim((string)($med['amount_text'] ?? ''));
 
-            if (class_exists('DrugDictionaryService')) {
-                $candidates = DrugDictionaryService::findCandidates($text, 5);
-                $med['_drug_dictionary_candidates'] = $candidates;
-                if ($candidates) {
-                    $best = $candidates[0];
-                    $med['_drug_dictionary_best'] = $best;
-                    $med['_drug_dictionary_score'] = (float)($best['score'] ?? 0.0);
-                    // 勝手に一般名/商品名として確定せず、候補だけ残す。表示名が空の時だけ代表名を補助する。
-                    if (trim((string)($med['drug_name'] ?? '')) === '' && trim((string)($best['display_name'] ?? '')) !== '') {
-                        $med['drug_name'] = (string)$best['display_name'];
-                        $med['needs_human_check'] = true;
-                        $med['reason'] = trim((string)($med['reason'] ?? '') . ' 辞書候補から代表名を補助。');
-                    }
-                } else {
-                    $med['_drug_dictionary_score'] = 0.0;
-                    $med['needs_human_check'] = true;
-                }
+            if ($rawDrugText === '') {
+                $rawDrugText = implode("\n", array_values(array_filter([$drugName, $genericName, $brandName, $doseText, $usageText, $amountText], static fn($v) => trim((string)$v) !== '')));
             }
 
-            if (class_exists('MedicationDosageCalculator')) {
-                $calc = MedicationDosageCalculator::calculate(
-                    (string)($med['drug_name'] ?? ''),
-                    (string)($med['dose_text'] ?? ''),
-                    (string)($med['usage_text'] ?? ''),
-                    $med['days_count'] ?? null
-                );
-                $med['_dosage_calculation'] = $calc;
-                if (MedicationDosageCalculator::shouldReplaceAmountText((string)($med['amount_text'] ?? ''), (string)($calc['amount_text'] ?? ''))) {
-                    $med['amount_text'] = (string)$calc['amount_text'];
-                }
+            $usageSupplement = $this->extractMedicationUsageSupplement($rawDrugText, $drugName, $usageText);
+            if ($usageSupplement !== '') {
+                $usageText = $usageText === '' ? $usageSupplement : $this->appendUniqueText($usageText, $usageSupplement);
             }
+
+            if ($drugName === '' && ($brandName !== '' || $genericName !== '')) {
+                $drugName = $brandName !== '' ? $brandName : $genericName;
+            }
+
+            $med['drug_name'] = $drugName;
+            $med['generic_name'] = $genericName;
+            $med['brand_name'] = $brandName;
+            $med['raw_drug_text'] = $rawDrugText;
+            $med['dose_text'] = $doseText;
+            $med['usage_text'] = $usageText;
+            $med['amount_text'] = $amountText;
             $meds[] = $med;
         }
         $normalized['medications'] = $meds;
         return $normalized;
+    }
+
+    private function appendUniqueText(string $base, string $addition): string
+    {
+        $base = trim($base);
+        $addition = trim($addition);
+        if ($addition === '' || $base === '') {
+            return $base !== '' ? $base : $addition;
+        }
+        $baseCompact = preg_replace('/\s+/u', '', $base) ?? $base;
+        $additionCompact = preg_replace('/\s+/u', '', $addition) ?? $addition;
+        if ($additionCompact !== '' && str_contains($baseCompact, $additionCompact)) {
+            return $base;
+        }
+        return $base . ' ' . $addition;
+    }
+
+    private function extractMedicationUsageSupplement(string $rawDrugText, string $drugName, string $currentUsage): string
+    {
+        $lines = preg_split('/\R+/u', trim($rawDrugText)) ?: [];
+        $out = [];
+        $drugCompact = preg_replace('/\s+/u', '', $drugName) ?? $drugName;
+        $usageCompact = preg_replace('/\s+/u', '', $currentUsage) ?? $currentUsage;
+        foreach ($lines as $line) {
+            $line = trim((string)$line);
+            if ($line === '') {
+                continue;
+            }
+            $lineCompact = preg_replace('/\s+/u', '', $line) ?? $line;
+            if ($drugCompact !== '' && $lineCompact === $drugCompact) {
+                continue;
+            }
+            if ($usageCompact !== '' && str_contains($usageCompact, $lineCompact)) {
+                continue;
+            }
+            if (preg_match('/(頭|頭部|額|顔|頬|口唇|首|胸|腹|背|腕|手|指|足|脚|陰部|患部|乾燥部位|かゆい所|湿疹部位|外用部位|右眼|左眼|両眼|鼻|耳|口腔|舌下|部位|塗布|塗擦|貼付|点眼|点耳|噴霧|吸入|うがい|含嗽|1\s*日|１\s*日|1\s*回|１\s*回|分\s*\d+|毎食|朝|昼|夕|就寝|寝る前|食前|食後|頓服|必要時|疼痛時)/u', $line)) {
+                $out[] = $line;
+            }
+        }
+        return implode(' ', array_values(array_unique($out)));
     }
 
     /** @param array<string,mixed> $normalized @return array<int,array<string,mixed>> */
@@ -364,10 +396,10 @@ final class PrescriptionFieldPostProcessorService
         $add('medical_institution_address', '保険医療機関の所在地', 'medical_institution', (string)($normalized['medical_institution']['address'] ?? ''), 'text', false);
         $add('medical_institution_prefecture_no', '都道府県番号', 'medical_institution', (string)($normalized['medical_institution']['prefecture_no'] ?? ''), 'code', false);
         $add('medical_institution_score_table_no', '点数表番号', 'medical_institution', (string)($normalized['medical_institution']['score_table_no'] ?? ''), 'code', false);
-        $add('change_disallowed', '変更不可', 'prescription', !empty($normalized['substitution']['change_disallowed']) ? '有' : '', 'boolean', false);
-        $add('doctor_signature_or_seal', '保険医署名・記名押印', 'prescription', !empty($normalized['substitution']['doctor_signature_or_seal']) ? '有' : '', 'boolean', false);
-        $add('check_mark_detected', '✅/レ点判定', 'prescription', !empty($normalized['substitution']['mark_check_detected']) ? '有' : '', 'boolean', false);
-        $add('x_mark_detected', '×判定', 'prescription', !empty($normalized['substitution']['mark_x_detected']) ? '有' : '', 'boolean', false);
+        $add('substitution.change_disallowed', '変更不可', 'prescription', !empty($normalized['substitution']['change_disallowed']) ? '有' : '無', 'boolean', false);
+        $add('substitution.doctor_signature_or_seal', '保険医署名・記名押印', 'prescription', !empty($normalized['substitution']['doctor_signature_or_seal']) ? '有' : '無', 'boolean', false);
+        $add('substitution.mark_check_detected', '✅/レ点判定', 'prescription', !empty($normalized['substitution']['mark_check_detected']) ? '有' : '無', 'boolean', false);
+        $add('substitution.mark_x_detected', '×判定', 'prescription', !empty($normalized['substitution']['mark_x_detected']) ? '有' : '無', 'boolean', false);
 
         return $fields;
     }

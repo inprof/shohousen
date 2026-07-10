@@ -160,7 +160,7 @@ function standard_review_key_alias(string $key): string
     $normalized = str_replace('-', '_', normalize_review_key($key));
     return match ($normalized) {
         'patient_name', 'name', 'patient.name' => 'patient.name',
-        'patient_kana', 'kana', 'patient.kana' => 'patient.kana',
+        'patient_kana', 'kana', 'patient.kana', 'patient_furigana', 'furigana', 'patient_furigana_kana' => 'patient.kana',
         'patient_birth_date', 'birth_date', 'patient.birth_date' => 'patient.birth_date',
         'patient_gender', 'gender', 'patient.gender' => 'patient.gender',
         'insurance_no', 'insurer_number', 'insurance.insurance_no' => 'insurance.insurance_no',
@@ -177,6 +177,11 @@ function standard_review_key_alias(string $key): string
         'medical_institution_address', 'address', 'medical_institution.address' => 'medical_institution.address',
         'medical_institution_prefecture_no', 'prefecture_no', 'medical_institution.prefecture_no' => 'medical_institution.prefecture_no',
         'medical_institution_score_table_no', 'score_table_no', 'medical_institution.score_table_no' => 'medical_institution.score_table_no',
+        'change_disallowed', 'substitution_change_disallowed', 'no_substitution', 'substitution.change_disallowed' => 'substitution.change_disallowed',
+        'doctor_signature_or_seal', 'substitution_doctor_signature_or_seal', 'doctor_signature', 'doctor_seal', 'substitution.doctor_signature_or_seal' => 'substitution.doctor_signature_or_seal',
+        'patient_request', 'substitution_patient_request', 'substitution.patient_request' => 'substitution.patient_request',
+        'check_mark_detected', 'mark_check_detected', 'substitution.mark_check_detected' => 'substitution.mark_check_detected',
+        'x_mark_detected', 'mark_x_detected', 'substitution.mark_x_detected' => 'substitution.mark_x_detected',
         default => $normalized,
     };
 }
@@ -189,7 +194,7 @@ function canonical_review_key(array $field): string
     $target = $label . ' ' . $key;
 
     if ($group === 'patient') {
-        if (str_contains($target, 'フリガナ')) return 'patient.kana';
+        if (str_contains($target, 'フリガナ') || str_contains($target, 'ふりがな') || str_contains($target, 'ふり仮名') || str_contains($target, 'カナ') || str_contains($target, 'かな')) return 'patient.kana';
         if (str_contains($target, '氏名') || str_contains($target, '患者名')) return 'patient.name';
         if (str_contains($target, '性別') || str_contains($target, '男') || str_contains($target, '女')) return 'patient.gender';
         if (str_contains($target, '生年月日')) return 'patient.birth_date';
@@ -206,6 +211,11 @@ function canonical_review_key(array $field): string
     if ($group === 'prescription') {
         if (str_contains($target, '交付年月日') || str_contains($target, '発行日')) return 'prescription.issued_on';
         if (str_contains($target, '使用期間')) return 'prescription.valid_until';
+        if (str_contains($target, '変更不可') || str_contains($target, '後発品変更不可') || str_contains($target, '医療上必要')) return 'substitution.change_disallowed';
+        if (str_contains($target, '保険医署名') || str_contains($target, '記名押印') || str_contains($target, '医師署名') || str_contains($target, '押印')) return 'substitution.doctor_signature_or_seal';
+        if (str_contains($target, '患者希望') || str_contains($target, '先発希望')) return 'substitution.patient_request';
+        if (str_contains($target, 'レ点') || str_contains($target, 'チェック') || str_contains($target, '✅')) return 'substitution.mark_check_detected';
+        if (str_contains($target, '×判定') || str_contains($target, 'バツ判定')) return 'substitution.mark_x_detected';
     }
     if ($group === 'medical_institution') {
         if (str_contains($target, '都道府県番号')) return 'medical_institution.prefecture_no';
@@ -235,6 +245,40 @@ function is_learning_only_review_field(array $field): bool
     return false;
 }
 
+function is_boolean_review_field(array $field): bool
+{
+    $key = standard_review_key_alias((string)($field['field_key'] ?? ''));
+    $label = (string)($field['field_label'] ?? '');
+    $type = (string)($field['value_type'] ?? '');
+    $ui = (string)($field['ui_template'] ?? '');
+    if ($type === 'boolean' || $ui === 'checkbox') {
+        return true;
+    }
+    foreach (['変更不可', '後発品変更不可', '患者希望', '先発希望', '署名', '記名押印', 'レ点', 'チェック', '×判定', '✅'] as $needle) {
+        if (str_contains($label, $needle) || str_contains($key, $needle)) {
+            return true;
+        }
+    }
+    return str_starts_with($key, 'substitution.');
+}
+
+function normalize_review_boolean_value(string $value): string
+{
+    $v = trim($value);
+    if ($v === '') {
+        return '無';
+    }
+    $yes = ['1', 'true', '有', 'あり', 'はい', '○', '〇', '✓', '✔', '☑', 'レ', 'レ点', 'チェック', 'checked'];
+    $no = ['0', 'false', '無', 'なし', 'いいえ', '×', '✕', '未', '未確認', 'unchecked'];
+    if (in_array($v, $yes, true)) {
+        return '有';
+    }
+    if (in_array($v, $no, true)) {
+        return '無';
+    }
+    return $v;
+}
+
 function review_confidence_badge(mixed $confidence, array $field): string
 {
     $raw = ocr_confidence_percent($confidence);
@@ -259,15 +303,26 @@ function upsert_review_field(array &$rows, array $field): void
     if (!in_array($group, ['patient','insurance','public_expense','prescription','medical_institution','medication','pharmacy','note','qr','other'], true)) {
         $group = 'other';
     }
+    $fieldValue = ocr_string($field['value'] ?? '');
+    $fieldAiValue = ocr_string($field['ai_value'] ?? ($field['value'] ?? ''));
+    $fieldNeedsHumanCheck = !empty($field['needs_human_check']);
+    if (is_boolean_review_field($field)) {
+        $fieldValue = normalize_review_boolean_value($fieldValue);
+        $fieldAiValue = normalize_review_boolean_value($fieldAiValue);
+        if (in_array($fieldValue, ['有', '無'], true)) {
+            $fieldNeedsHumanCheck = false;
+        }
+    }
+
     $row = [
         'field_key' => $key,
         'field_label' => ocr_string($field['field_label'] ?? $key) ?: $key,
         'field_group' => $group,
-        'value' => ocr_string($field['value'] ?? ''),
-        'ai_value' => ocr_string($field['ai_value'] ?? ($field['value'] ?? '')),
+        'value' => $fieldValue,
+        'ai_value' => $fieldAiValue,
         'source_section' => ocr_string($field['source_section'] ?? ''),
         'confidence' => ocr_confidence_percent($field['confidence'] ?? null),
-        'needs_human_check' => !empty($field['needs_human_check']),
+        'needs_human_check' => $fieldNeedsHumanCheck,
         'required' => !empty($field['required']),
         'include_default' => !empty($field['include_default']),
         'ui_template' => ocr_string($field['ui_template'] ?? 'input') ?: 'input',
@@ -340,9 +395,10 @@ function render_dynamic_value_control(string $name, string $value, string $uiTem
         return '<textarea name="' . $escapedName . '" rows="2" placeholder="空欄"' . $dataAttr . '>' . $escapedValue . '</textarea>';
     }
     if ($uiTemplate === 'checkbox' || $valueType === 'boolean') {
-        $yesSelected = in_array($value, ['1', 'true', '有', 'あり', 'はい', '○', '✓'], true) ? ' selected' : '';
-        $noSelected = in_array($value, ['0', 'false', '無', 'なし', 'いいえ', '×'], true) ? ' selected' : '';
-        return '<select name="' . $escapedName . '"' . $dataAttr . '><option value="">空欄</option><option value="有"' . $yesSelected . '>有</option><option value="無"' . $noSelected . '>無</option></select>';
+        $normalizedBool = normalize_review_boolean_value($value);
+        $yesSelected = $normalizedBool === '有' ? ' selected' : '';
+        $noSelected = $normalizedBool === '無' ? ' selected' : '';
+        return '<select name="' . $escapedName . '"' . $dataAttr . '><option value="有"' . $yesSelected . '>有</option><option value="無"' . $noSelected . '>無</option></select>';
     }
     if ($uiTemplate === 'date' || $valueType === 'date') {
         $type = preg_match('/^\d{4}-\d{2}-\d{2}$/', $value) ? 'date' : 'text';
@@ -473,6 +529,7 @@ $validationByKey = build_validation_by_key($fieldValidations);
 $reviewRowsByKey = [];
 $fixedDefinitions = [
     ['patient.name', '患者名', 'patient', $patient['name'] ?? '', 'person_name', 'input', 10, $patient['confidence'] ?? null],
+    ['patient.kana', 'フリガナ/ふりがな', 'patient', $patient['kana'] ?? '', 'text', 'input', 15, $patient['confidence'] ?? null],
     ['patient.gender', '性別', 'patient', $patient['gender'] ?? '', 'text', 'select', 20, $patient['confidence'] ?? null],
     ['patient.birth_date', '生年月日', 'patient', $patient['birth_date'] ?? '', 'date', 'date', 30, $patient['confidence'] ?? null],
     ['insurance.insurance_no', '保険者番号', 'insurance', $insurance['insurance_no'] ?? '', 'code', 'input', 40, $insurance['confidence'] ?? null],
@@ -487,8 +544,8 @@ $fixedDefinitions = [
     ['medical_institution.address', '保険医療機関所在地', 'medical_institution', $medical['address'] ?? '', 'text', 'input', 91, $medical['confidence'] ?? null],
     ['medical_institution.phone', '電話番号', 'medical_institution', $medical['phone'] ?? '', 'text', 'input', 92, $medical['confidence'] ?? null],
     ['medical_institution.doctor_name', '保険医氏名', 'medical_institution', $medical['doctor_name'] ?? '', 'person_name', 'input', 93, $medical['confidence'] ?? null],
-    ['substitution.change_disallowed', '変更不可', 'prescription', !empty($substitution['change_disallowed']) ? '有' : '', 'boolean', 'select', 94, $substitution['confidence'] ?? null],
-    ['substitution.doctor_signature_or_seal', '保険医署名・記名押印', 'prescription', !empty($substitution['doctor_signature_or_seal']) ? '有' : '', 'boolean', 'select', 95, $substitution['confidence'] ?? null],
+    ['substitution.change_disallowed', '変更不可', 'prescription', !empty($substitution['change_disallowed']) ? '有' : '無', 'boolean', 'select', 94, $substitution['confidence'] ?? null],
+    ['substitution.doctor_signature_or_seal', '保険医署名・記名押印', 'prescription', !empty($substitution['doctor_signature_or_seal']) ? '有' : '無', 'boolean', 'select', 95, $substitution['confidence'] ?? null],
 ];
 foreach ($fixedDefinitions as [$key, $label, $group, $value, $valueType, $uiTemplate, $order, $confidence]) {
     $value = ocr_string($value);
@@ -872,7 +929,9 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
         </label>
         <input type="hidden" name="generic_name[]" value="<?= h(medication_visible_support_value($med, 'generic_name')) ?>">
         <input type="hidden" name="brand_name[]" value="<?= h(medication_visible_support_value($med, 'brand_name')) ?>">
-        <input type="hidden" name="raw_drug_text[]" value="<?= h((string)($med['raw_drug_text'] ?? ($med['drug_name'] ?? ''))) ?>">
+        <label class="med-field-support">処方箋上の表記/補足
+          <textarea name="raw_drug_text[]" rows="2" placeholder="例: 頭に1日1〜2回塗布 / 乾燥部位に1日2回"><?= h((string)($med['raw_drug_text'] ?? ($med['drug_name'] ?? ''))) ?></textarea>
+        </label>
         <label>用量（1回量）<input name="dose_text[]" value="<?= h($doseText) ?>" data-med-dose placeholder="例: 1錠 / 1回5mL"></label>
         <label>用法<input name="usage_text[]" value="<?= h((string)($med['usage_text'] ?? '')) ?>" data-med-usage></label>
         <label>日数<input type="number" name="days_count[]" value="<?= h((string)($med['days_count'] ?? '')) ?>" data-med-days></label>
@@ -907,7 +966,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       <label class="med-field-main">薬品名（代表名）<textarea name="drug_name[]" rows="2" placeholder="保存する代表薬品名"></textarea></label>
       <input type="hidden" name="generic_name[]" value="">
       <input type="hidden" name="brand_name[]" value="">
-      <input type="hidden" name="raw_drug_text[]" value="">
+      <label class="med-field-support">処方箋上の表記/補足<textarea name="raw_drug_text[]" rows="2" placeholder="例: 頭に1日1〜2回塗布 / 乾燥部位に1日2回"></textarea></label>
       <label>用量（1回量）<input name="dose_text[]" value="" data-med-dose placeholder="例: 1錠 / 1回5mL"></label>
       <label>用法<input name="usage_text[]" value="" data-med-usage></label>
       <label>日数<input type="number" name="days_count[]" value="" data-med-days></label>
@@ -1227,6 +1286,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
   function fixedFieldFallbackControl(key) {
     switch (key) {
       case 'patient.name': return findReviewValueByLabel('patient', [/氏名/, /患者名/, /name/i]);
+      case 'patient.kana': return findReviewValueByLabel('patient', [/フリガナ/, /ふりがな/, /ふり仮名/, /カナ/, /かな/, /kana/i]);
       case 'patient.gender': return findReviewValueByLabel('patient', [/性別/, /男|女/, /gender/i]);
       case 'patient.birth_date': return findReviewValueByLabel('patient', [/生年月日/, /birth/i]);
       case 'insurance.insurance_no': return findReviewValueByLabel('insurance', [/保険者番号/, /insurance.*no/i]);
