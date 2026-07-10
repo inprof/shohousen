@@ -169,6 +169,7 @@ function standard_review_key_alias(string $key): string
         'public_payer_no', 'payer_no', 'public_expense_payer_no', 'public_expense.payer_no' => 'public_expense.payer_no',
         'public_beneficiary_no', 'beneficiary_no', 'public_expense_beneficiary_no', 'public_expense.beneficiary_no' => 'public_expense.beneficiary_no',
         'issued_on', 'prescription_issued_on', 'prescription.issued_on' => 'prescription.issued_on',
+        'received_on', 'prescription_received_on', 'prescription.received_on' => 'prescription.received_on',
         'expires_on', 'valid_until', 'prescription.expires_on', 'prescription.valid_until' => 'prescription.expires_on',
         'medical_institution_code', 'institution_code', 'medical_institution.code' => 'medical_institution.code',
         'medical_institution_name', 'medical_name', 'institution_name', 'medical_institution.name' => 'medical_institution.name',
@@ -193,6 +194,10 @@ function canonical_review_key(array $field): string
     $group = (string)($field['field_group'] ?? 'other');
     $target = $label . ' ' . $key;
 
+    // AIが分類を誤って insurance に入れても、ラベル上「公費」「受給者番号」が明確なら公費側へ寄せる。
+    if (str_contains($target, '公費負担者番号')) return 'public_expense.payer_no';
+    if (str_contains($target, '公費負担医療') || str_contains($target, '公費受給者番号') || str_contains($target, '受給者番号')) return 'public_expense.beneficiary_no';
+
     if ($group === 'patient') {
         if (str_contains($target, 'フリガナ') || str_contains($target, 'ふりがな') || str_contains($target, 'ふり仮名') || str_contains($target, 'カナ') || str_contains($target, 'かな')) return 'patient.kana';
         if (str_contains($target, '氏名') || str_contains($target, '患者名')) return 'patient.name';
@@ -210,7 +215,8 @@ function canonical_review_key(array $field): string
     }
     if ($group === 'prescription') {
         if (str_contains($target, '交付年月日') || str_contains($target, '発行日')) return 'prescription.issued_on';
-        if (str_contains($target, '使用期間')) return 'prescription.valid_until';
+        if (str_contains($target, '受付年月日') || str_contains($target, '受付日')) return 'prescription.received_on';
+        if (str_contains($target, '使用期間')) return 'prescription.expires_on';
         if (str_contains($target, '変更不可') || str_contains($target, '後発品変更不可') || str_contains($target, '医療上必要')) return 'substitution.change_disallowed';
         if (str_contains($target, '保険医署名') || str_contains($target, '記名押印') || str_contains($target, '医師署名') || str_contains($target, '押印')) return 'substitution.doctor_signature_or_seal';
         if (str_contains($target, '患者希望') || str_contains($target, '先発希望')) return 'substitution.patient_request';
@@ -593,6 +599,7 @@ $fixedDefinitions = [
     ['public_expense.payer_no', '公費負担者番号', 'public_expense', $publicExpense['payer_no'] ?? '', 'code', 'input', 62, $publicExpense['confidence'] ?? null],
     ['public_expense.beneficiary_no', '公費負担医療の受給者番号', 'public_expense', $publicExpense['beneficiary_no'] ?? '', 'code', 'input', 64, $publicExpense['confidence'] ?? null],
     ['prescription.issued_on', '交付年月日', 'prescription', $prescription['issued_on'] ?? '', 'date', 'date', 70, $prescription['confidence'] ?? null],
+    ['prescription.received_on', '受付年月日', 'prescription', $prescription['received_on'] ?? '', 'date', 'date', 72, $prescription['confidence'] ?? null],
     ['prescription.expires_on', '処方箋使用期間', 'prescription', $prescription['expires_on'] ?? '', 'date', 'date', 75, $prescription['confidence'] ?? null],
     ['medical_institution.code', '医療機関コード', 'medical_institution', $medical['code'] ?? '', 'code', 'input', 80, $medical['confidence'] ?? null],
     ['medical_institution.name', '保険医療機関名', 'medical_institution', $medical['name'] ?? '', 'text', 'input', 90, $medical['confidence'] ?? null],
@@ -667,6 +674,17 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
 <?php endif; ?>
 <?php if (isset($_GET['retry_done'])): ?>
   <div class="alert info"><strong>再読み込み完了</strong><br>1回目と2回目の読取結果を項目ごとに表示しています。採用する値を選んでください。</div>
+<?php endif; ?>
+<?php if (!empty($data['_auto_field_repair']) && is_array($data['_auto_field_repair'])): ?>
+  <?php $autoRepair = $data['_auto_field_repair']; ?>
+  <?php if (!empty($autoRepair['executed'])): ?>
+    <div class="alert <?= !empty($autoRepair['unresolved_fields']) ? 'warning' : 'info' ?>">
+      <strong>項目別再確認を実行しました</strong><br>
+      <?= h((string)($autoRepair['message'] ?? 'PHP検証でNGになった項目だけを再確認しました。')) ?>
+    </div>
+  <?php elseif (!empty($autoRepair['error'])): ?>
+    <div class="alert warning"><strong>項目別再確認に失敗しました</strong><br><?= h((string)$autoRepair['error']) ?></div>
+  <?php endif; ?>
 <?php endif; ?>
 <?php if (!empty($data['warnings'])): ?>
   <div class="alert info"><strong>解析メモ</strong><br><?= h(implode(' / ', array_map('strval', $data['warnings']))) ?></div>
@@ -1059,6 +1077,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
         <div><span>保険者番号</span><strong data-preview="insurance.insurance_no"><?= h((string)($insurance['insurance_no'] ?? '')) ?></strong></div>
         <div><span>記号番号</span><strong data-preview="insurance.insured_symbol_number"><?= h((string)($insurance['insured_symbol_number'] ?? '')) ?></strong></div>
         <div><span>交付年月日</span><strong data-preview="prescription.issued_on"><?= h((string)($prescription['issued_on'] ?? '')) ?></strong></div>
+        <div><span>受付年月日</span><strong data-preview="prescription.received_on"><?= h((string)($prescription['received_on'] ?? '')) ?></strong></div>
         <div><span>医療機関コード</span><strong data-preview="medical_institution.code"><?= h((string)($medical['code'] ?? '')) ?></strong></div>
         <div><span>医療機関名</span><strong data-preview="medical_institution.name"><?= h((string)($medical['name'] ?? '')) ?></strong></div>
       </div>
@@ -1093,6 +1112,7 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
     'insurance.insurance_no': { required: true, label: '保険者番号', type: 'code', lengths: [6, 8] },
     'insurance.insured_symbol_number': { required: true, label: '被保険者証・記号番号' },
     'prescription.issued_on': { required: true, label: '交付年月日', type: 'date' },
+    'prescription.received_on': { required: false, label: '受付年月日', type: 'date' },
     'medical_institution.code': { required: true, label: '医療機関コード', type: 'code', lengths: [7, 10] },
     'medical_institution.name': { required: true, label: '保険医療機関名' },
     'medical_institution.doctor_name': { required: true, label: '保険医氏名' },
@@ -1354,6 +1374,8 @@ View::header('解析結果確認', ['styles' => ['/assets/css/prescription_resul
       case 'insurance.insured_symbol_number': return findReviewValueByLabel('insurance', [/記号/, /番号/, /被保険者/]);
       case 'insurance.copay_rate': return findReviewValueByLabel('insurance', [/負担割合/, /負担/]);
       case 'prescription.issued_on': return findReviewValueByLabel('prescription', [/交付年月日/, /発行日/, /issued/i]);
+      case 'prescription.received_on': return findReviewValueByLabel('prescription', [/受付年月日/, /受付日/, /received/i]);
+      case 'prescription.expires_on': return findReviewValueByLabel('prescription', [/使用期間/, /有効期限/, /期限/, /expires/i]);
       case 'medical_institution.code': return findReviewValueByLabel('medical_institution', [/医療機関コード/, /コード/]);
       case 'medical_institution.name': return findReviewValueByLabel('medical_institution', [/医療機関名/, /医療機関.*名称/, /所在.*名称/]);
       case 'medical_institution.address': return findReviewValueByLabel('medical_institution', [/所在地/, /住所/]);

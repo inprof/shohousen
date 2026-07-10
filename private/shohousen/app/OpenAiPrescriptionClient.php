@@ -436,6 +436,150 @@ final class OpenAiPrescriptionClient
         return $mapping;
     }
 
+
+    /**
+     * PHP検証でNG/判定不能になった主要項目だけを、同じ画像から再確認する。
+     * 初回OCR全体をやり直すのではなく、対象項目を絞ってgpt-4o-miniへ再読取させる。
+     *
+     * @param array<string,mixed> $currentNormalized
+     * @param array<int,array<string,mixed>> $targetFields
+     * @param array<string,mixed> $ocrStructured
+     * @return array<string,mixed>
+     */
+    public function repairCoreFieldsFromImage(string $imagePath, string $mimeType, array $currentNormalized, array $targetFields, array $ocrStructured = []): array
+    {
+        $apiKey = trim((string)app_config('openai.api_key', ''));
+        if ($apiKey === '') {
+            if ((bool)app_config('app.demo_mode', false)) {
+                return ['fields' => [], 'warnings' => ['demo_mode: targeted repair skipped'], 'overall_confidence' => 0, 'raw_response' => ['demo' => true], 'model' => 'demo'];
+            }
+            throw new RuntimeException('OpenAI APIキーが未設定です。');
+        }
+        if (!$targetFields) {
+            return ['fields' => [], 'warnings' => [], 'overall_confidence' => 0, 'raw_response' => [], 'model' => $this->modelForStage('ocr')];
+        }
+
+        $base64 = base64_encode((string)file_get_contents($imagePath));
+        $detail = (string)app_config('openai.vision_detail', 'high');
+        $model = $this->modelForStage('ocr');
+        $payload = [
+            'model' => $model,
+            'input' => [
+                [
+                    'role' => 'system',
+                    'content' => [
+                        ['type' => 'input_text', 'text' => self::fieldRepairSystemPrompt()],
+                    ],
+                ],
+                [
+                    'role' => 'user',
+                    'content' => [
+                        ['type' => 'input_text', 'text' => json_encode([
+                            'task' => 'PHP検証でNGまたは判定不能になった項目だけを画像から再確認する',
+                            'target_fields' => $targetFields,
+                            'current_normalized_json' => self::compactRepairContext($currentNormalized),
+                            'ocr_raw_text' => (string)($currentNormalized['_ocr_raw_text'] ?? ($ocrStructured['raw_text'] ?? '')),
+                            'ocr_structured_json' => $ocrStructured,
+                        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE)],
+                        [
+                            'type' => 'input_image',
+                            'image_url' => 'data:' . $mimeType . ';base64,' . $base64,
+                            'detail' => in_array($detail, ['low', 'high', 'auto'], true) ? $detail : 'high',
+                        ],
+                    ],
+                ],
+            ],
+            'text' => [
+                'format' => [
+                    'type' => 'json_schema',
+                    'name' => 'prescription_field_repair',
+                    'strict' => true,
+                    'schema' => self::fieldRepairResponseSchema(),
+                ],
+            ],
+            'max_output_tokens' => (int)app_config('openai.field_repair_max_output_tokens', 2500),
+        ];
+
+        $response = $this->postJson('https://api.openai.com/v1/responses', $payload, $apiKey, (int)app_config('openai.field_repair_timeout_seconds', 90));
+        $jsonText = self::extractOutputText($response);
+        $repair = json_decode($jsonText, true);
+        if (!is_array($repair)) {
+            throw new OpenAiPrescriptionJsonParseException(
+                'OpenAI項目別再確認JSONの解析に失敗しました。IO診断で失敗時レスポンスを確認してください。',
+                $response,
+                $jsonText,
+                json_last_error_msg()
+            );
+        }
+        $repair['raw_response'] = $response;
+        $repair['model'] = $model;
+        return $repair;
+    }
+
+    /** @return array<string,mixed> */
+    private static function fieldRepairResponseSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => ['fields', 'warnings', 'overall_confidence'],
+            'properties' => [
+                'fields' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'additionalProperties' => false,
+                        'required' => ['field_key', 'field_label', 'value', 'raw_text', 'confidence', 'needs_human_check', 'reason'],
+                        'properties' => [
+                            'field_key' => ['type' => 'string'],
+                            'field_label' => ['type' => 'string'],
+                            'value' => ['type' => 'string'],
+                            'raw_text' => ['type' => 'string'],
+                            'confidence' => ['type' => 'number'],
+                            'needs_human_check' => ['type' => 'boolean'],
+                            'reason' => ['type' => 'string'],
+                        ],
+                    ],
+                ],
+                'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'overall_confidence' => ['type' => 'number'],
+            ],
+        ];
+    }
+
+    private static function fieldRepairSystemPrompt(): string
+    {
+        return <<<PROMPT
+あなたは日本の処方箋OCRの「項目別再確認」担当です。
+PHP検証でNG/判定不能になった target_fields だけを、画像とOCR生テキストから再確認してください。
+
+厳守:
+- target_fields に無い項目は返さないでください。
+- 読めない項目は value を空文字にし、reason に読めない理由を入れてください。
+- 和暦は和暦表で西暦YYYY-MM-DDへ変換してください。令和8年は2026年です。平成/昭和/大正/明治も同様に元号年から変換してください。
+- 受付年月日、交付年月日、生年月日を混同しないでください。
+- 保険者番号は6桁または8桁だけです。10桁や9桁の場合は別欄混入の可能性があるため、画像上の保険者番号欄だけを読み直してください。
+- 公費負担者番号は8桁、公費負担医療の受給者番号は7桁です。記号番号へ受給者番号を入れないでください。
+- 医療機関コードは通常7桁、都道府県番号+点数表番号付きなら10桁です。住所の番地や電話番号を医療機関コードにしないでください。
+- 医療機関名、薬局名、住所、電話番号を混同しないでください。
+- JSON Schema以外の文章は出力しないでください。
+PROMPT;
+    }
+
+    /** @param array<string,mixed> $currentNormalized @return array<string,mixed> */
+    private static function compactRepairContext(array $currentNormalized): array
+    {
+        return [
+            'patient' => $currentNormalized['patient'] ?? [],
+            'insurance' => $currentNormalized['insurance'] ?? [],
+            'public_expense' => $currentNormalized['public_expense'] ?? [],
+            'prescription' => $currentNormalized['prescription'] ?? [],
+            'medical_institution' => $currentNormalized['medical_institution'] ?? [],
+            'warnings' => $currentNormalized['warnings'] ?? [],
+            'field_validations' => $currentNormalized['field_validations'] ?? [],
+        ];
+    }
+
     private function postJson(string $url, array $payload, string $apiKey, ?int $timeoutSeconds = null): array
     {
         $ch = curl_init($url);
@@ -643,6 +787,7 @@ PROMPT;
 - medications の順序は、処方欄に印字されている上から下、左から右の順番を厳守してください。薬効や重要度で並べ替えないでください。
 - 外用薬・点眼薬・頓服等で「頭に」「乾燥部位に」「患部に」「右眼に」などの使用部位・使用条件が書かれている場合は不要扱いせず、usage_textに原文順で含めてください。
 - 帳票上に存在する項目は form_fields に残してください。ただし薬品名元テキスト・辞書候補・推定候補などの補助学習専用データは form_fields に出さないでください。
+- 和暦はPHP側でも検証しますが、この段階でも必ず和暦表で西暦へ変換してください。令和8年は2026年です。受付年月日、交付年月日、生年月日を混同しないでください。
 - 保険者番号は6桁または8桁、公費負担者番号は8桁、公費受給者番号は7桁、医療機関コードは通常7桁として扱ってください。条件に合わない場合は needs_human_check=true にしてください。
 {$template}{$learningHints}
 PROMPT;
@@ -659,7 +804,7 @@ PROMPT;
 医療情報のため、不明点は推測で埋めず、空欄・null・needs_human_check=trueで返してください。
 患者情報、保険情報、医療機関情報、処方薬情報を抽出します。
 処方箋の様式は医療機関・拠点ごとに異なるため、固定テンプレートだけに寄せず、画像内に見える項目名と値をできる限り form_fields に列挙してください。
-form_fields には、空欄でも帳票上に存在する主要項目を入れてください。例: 公費負担者番号、公費負担医療の受給者番号、保険者番号、被保険者証の記号番号、患者氏名、フリガナ/ふりがな/カナ/かな、生年月日、性別、区分、交付年月日、処方箋使用期間、医療機関所在地、医療機関名、電話番号、保険医氏名、都道府県番号、点数表番号、医療機関コード、備考、保険医署名、記名押印、変更不可（医療上必要）、後発品変更不可、患者希望、先発医薬品患者希望、QR有無など。
+form_fields には、空欄でも帳票上に存在する主要項目を入れてください。例: 公費負担者番号、公費負担医療の受給者番号、保険者番号、被保険者証の記号番号、患者氏名、フリガナ/ふりがな/カナ/かな、生年月日、性別、区分、交付年月日、受付年月日、処方箋使用期間、医療機関所在地、医療機関名、電話番号、保険医氏名、都道府県番号、点数表番号、医療機関コード、備考、保険医署名、記名押印、変更不可（医療上必要）、後発品変更不可、患者希望、先発医薬品患者希望、QR有無など。
 薬品名・用量・用法・日数・総量は form_fields に重複出力せず、medications 配列に集約してください。画面側では medications の処方薬カードで修正・DB保存します。
 ただし、画像上に実際に書かれていない一般名候補・商品名候補・薬品名元テキスト・辞書候補・推定候補は、form_fieldsには出さないでください。これらは画面表示項目ではなく、medications内または後処理辞書の補助データとして扱います。
 画面側では field_group と value_type を見て、form_fields から修正用の入力一覧を動的に生成します。画像内に見える項目は、固定項目に入らなくても form_fields に残してください。
@@ -749,9 +894,10 @@ PROMPT;
                 'prescription' => [
                     'type' => 'object',
                     'additionalProperties' => false,
-                    'required' => ['issued_on', 'expires_on', 'confidence', 'needs_human_check'],
+                    'required' => ['issued_on', 'received_on', 'expires_on', 'confidence', 'needs_human_check'],
                     'properties' => [
                         'issued_on' => ['type' => 'string'],
+                        'received_on' => ['type' => 'string'],
                         'expires_on' => ['type' => 'string'],
                         'confidence' => ['type' => 'number'],
                         'needs_human_check' => ['type' => 'boolean'],
@@ -844,7 +990,7 @@ PROMPT;
         return [
             'patient' => ['name' => '', 'kana' => '', 'birth_date' => '', 'gender' => '不明', 'confidence' => 0.0, 'needs_human_check' => true],
             'insurance' => ['insurance_no' => '', 'insured_symbol_number' => '', 'copay_rate' => '', 'confidence' => 0.0, 'needs_human_check' => true],
-            'prescription' => ['issued_on' => '', 'expires_on' => '', 'confidence' => 0.0, 'needs_human_check' => true],
+            'prescription' => ['issued_on' => '', 'received_on' => '', 'expires_on' => '', 'confidence' => 0.0, 'needs_human_check' => true],
             'medical_institution' => ['code' => '', 'name' => '', 'doctor_name' => '', 'phone' => '', 'confidence' => 0.0, 'needs_human_check' => true],
             'medications' => [],
             'form_fields' => [],
@@ -858,7 +1004,7 @@ PROMPT;
         return self::normalize([
             'patient' => ['name' => '山田 花子', 'kana' => '', 'birth_date' => '1975-04-12', 'gender' => '女性', 'confidence' => 94.2, 'needs_human_check' => true],
             'insurance' => ['insurance_no' => '12345678', 'insured_symbol_number' => '987654321', 'copay_rate' => '3割', 'confidence' => 90.0, 'needs_human_check' => true],
-            'prescription' => ['issued_on' => '2024-05-20', 'expires_on' => '', 'confidence' => 88.0, 'needs_human_check' => true],
+            'prescription' => ['issued_on' => '2024-05-20', 'received_on' => '', 'expires_on' => '', 'confidence' => 88.0, 'needs_human_check' => true],
             'medical_institution' => ['code' => '1312345', 'name' => 'さくらクリニック', 'doctor_name' => '', 'phone' => '', 'confidence' => 86.0, 'needs_human_check' => true],
             'medications' => [
                 ['drug_name' => 'アムロジピンOD錠5mg', 'generic_name' => 'アムロジピンOD錠5mg', 'brand_name' => '', 'raw_drug_text' => 'アムロジピンOD錠5mg', 'name_relation' => 'single', 'dose_text' => '1錠', 'usage_text' => '1日1回 朝食後', 'days_count' => 28, 'amount_text' => '28日分', 'confidence' => 89.0, 'needs_human_check' => true, 'reason' => 'demo'],
@@ -879,7 +1025,7 @@ PROMPT;
     private static function applyReferenceNormalizers(array $normalized): array
     {
         if (class_exists('PrescriptionReferenceRuleService')) {
-            foreach ([['patient','birth_date'], ['prescription','issued_on'], ['prescription','expires_on']] as [$section, $key]) {
+            foreach ([['patient','birth_date'], ['prescription','issued_on'], ['prescription','received_on'], ['prescription','expires_on']] as [$section, $key]) {
                 $raw = (string)($normalized[$section][$key] ?? '');
                 if ($raw === '') {
                     continue;
@@ -1025,6 +1171,7 @@ PROMPT;
             ['insured_symbol_number', '被保険者証・被保険者手帳の記号・番号', 'insurance', (string)($normalized['insurance']['insured_symbol_number'] ?? ''), 'code', '保険欄', $normalized['insurance']['confidence'] ?? 0, true],
             ['copay_rate', '負担割合', 'insurance', (string)($normalized['insurance']['copay_rate'] ?? ''), 'text', '保険欄', $normalized['insurance']['confidence'] ?? 0, false],
             ['issued_on', '交付年月日', 'prescription', (string)($normalized['prescription']['issued_on'] ?? ''), 'date', '処方箋欄', $normalized['prescription']['confidence'] ?? 0, true],
+            ['received_on', '受付年月日', 'prescription', (string)($normalized['prescription']['received_on'] ?? ''), 'date', '処方箋欄', $normalized['prescription']['confidence'] ?? 0, false],
             ['expires_on', '処方箋の使用期間', 'prescription', (string)($normalized['prescription']['expires_on'] ?? ''), 'date', '処方箋欄', $normalized['prescription']['confidence'] ?? 0, false],
             ['medical_institution_code', '医療機関コード', 'medical_institution', (string)($normalized['medical_institution']['code'] ?? ''), 'code', '医療機関欄', $normalized['medical_institution']['confidence'] ?? 0, true],
             ['medical_institution_name', '保険医療機関の名称', 'medical_institution', (string)($normalized['medical_institution']['name'] ?? ''), 'text', '医療機関欄', $normalized['medical_institution']['confidence'] ?? 0, true],

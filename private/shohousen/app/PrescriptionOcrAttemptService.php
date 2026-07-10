@@ -22,6 +22,7 @@ final class PrescriptionOcrAttemptService
             'public_expense.payer_no' => '公費負担者番号',
             'public_expense.beneficiary_no' => '公費負担医療の受給者番号',
             'prescription.issued_on' => '交付年月日',
+            'prescription.received_on' => '受付年月日',
             'prescription.expires_on' => '処方箋使用期間',
             'medical_institution.code' => '医療機関コード',
             'medical_institution.prefecture_no' => '都道府県番号',
@@ -107,7 +108,7 @@ final class PrescriptionOcrAttemptService
         foreach (array_keys(self::coreFieldLabels()) as $path) {
             $v = $this->getPath($normalized, $path);
             if (is_bool($v)) {
-                $values[$path] = $v ? '有' : '';
+                $values[$path] = $v ? '有' : '無';
             } else {
                 $values[$path] = trim((string)$v);
             }

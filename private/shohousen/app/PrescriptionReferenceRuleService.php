@@ -185,6 +185,28 @@ final class PrescriptionReferenceRuleService
                 'checksum_applicable' => $checksumApplicable,
             ];
         }
+        $candidate = self::bestLengthCorrectionCandidate($type, $digits, $validLengths);
+        if ($candidate !== null) {
+            return [
+                'type' => $type,
+                'raw' => $raw,
+                'digits' => (string)$candidate['digits'],
+                'length' => strlen((string)$candidate['digits']),
+                'original_digits' => $digits,
+                'original_length' => $len,
+                'status' => 'corrected_length_candidate',
+                'valid' => true,
+                'needs_human_check' => true,
+                'message' => '桁数不一致のため、OCRの余分な数字混入候補として「' . (string)$candidate['digits'] . '」へ補正しました。確定前に原画像を確認してください。',
+                'classification' => self::classifyCode($type, (string)$candidate['digits']),
+                'expected_check_digit' => self::expectedMod10CheckDigit(substr((string)$candidate['digits'], 0, -1)),
+                'actual_check_digit' => (int)substr((string)$candidate['digits'], -1),
+                'checksum_applicable' => true,
+                'auto_corrected' => true,
+                'correction_candidates' => $candidate['all_candidates'],
+            ];
+        }
+
         return [
             'type' => $type,
             'raw' => $raw,
@@ -196,6 +218,80 @@ final class PrescriptionReferenceRuleService
             'message' => $invalidMessage,
             'classification' => '',
         ];
+    }
+
+    /** @param array<int,int> $validLengths @return array<string,mixed>|null */
+    private static function bestLengthCorrectionCandidate(string $type, string $digits, array $validLengths): ?array
+    {
+        $len = strlen($digits);
+        if ($len < 2) {
+            return null;
+        }
+        // 自動補正は「1桁だけ多く読んだ」ケースに限定する。足りない桁は推測で足さない。
+        $candidateLengths = [];
+        foreach ($validLengths as $validLength) {
+            if ($len === $validLength + 1) {
+                $candidateLengths[] = $validLength;
+            }
+        }
+        if (!$candidateLengths) {
+            return null;
+        }
+
+        $scored = [];
+        for ($i = 0; $i < $len; $i++) {
+            $candidate = substr($digits, 0, $i) . substr($digits, $i + 1);
+            if (!in_array(strlen($candidate), $candidateLengths, true)) {
+                continue;
+            }
+            if (!self::candidateHasVerifiableChecksum($type, $candidate)) {
+                continue;
+            }
+            $score = 0;
+            $removed = $digits[$i];
+            $leftSame = $i > 0 && $digits[$i - 1] === $removed;
+            $rightSame = $i < $len - 1 && $digits[$i + 1] === $removed;
+            if ($leftSame || $rightSame) {
+                $score += 60;
+            }
+            if ($removed === '0') {
+                $score += 25;
+            }
+            if (self::classifyCode($type, $candidate) !== '') {
+                $score += 10;
+            }
+            $scored[$candidate] = max($scored[$candidate] ?? 0, $score);
+        }
+        if (!$scored) {
+            return null;
+        }
+        arsort($scored);
+        $candidates = array_keys($scored);
+        $best = $candidates[0];
+        $bestScore = (int)$scored[$best];
+        $secondScore = isset($candidates[1]) ? (int)$scored[$candidates[1]] : -1;
+        if ($secondScore >= $bestScore) {
+            return null;
+        }
+        return [
+            'digits' => $best,
+            'score' => $bestScore,
+            'all_candidates' => array_map(static fn(string $digits): array => ['digits' => $digits, 'score' => (int)$scored[$digits]], $candidates),
+        ];
+    }
+
+    private static function candidateHasVerifiableChecksum(string $type, string $digits): bool
+    {
+        $len = strlen($digits);
+        if ($len < 2) {
+            return false;
+        }
+        // 7桁の医療機関コード単体は都道府県番号・点数表番号が無いと完全照合できないため、自動補正対象外。
+        if (in_array($type, ['medical_institution_code', 'pharmacy_code'], true) && $len !== 10) {
+            return false;
+        }
+        $expected = self::expectedMod10CheckDigit(substr($digits, 0, -1));
+        return $expected === (int)substr($digits, -1);
     }
 
 

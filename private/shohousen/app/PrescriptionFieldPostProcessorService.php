@@ -16,6 +16,7 @@ final class PrescriptionFieldPostProcessorService
     public function process(array $normalized): array
     {
         $normalized = $this->hydrateFixedSectionsFromFormFields($normalized);
+        $normalized = $this->hydrateFixedSectionsFromOcrRawText($normalized);
         $normalized = $this->applyReferenceValidation($normalized);
         $normalized = $this->enrichMedications($normalized);
         $normalized['form_fields'] = $this->ensureTargetFields((array)($normalized['form_fields'] ?? []), $normalized);
@@ -88,6 +89,196 @@ final class PrescriptionFieldPostProcessorService
         return $normalized;
     }
 
+
+    /** @param array<string,mixed> $normalized @return array<string,mixed> */
+    private function hydrateFixedSectionsFromOcrRawText(array $normalized): array
+    {
+        if (!class_exists('PrescriptionReferenceRuleService')) {
+            return $normalized;
+        }
+        $lines = $this->ocrSourceLines($normalized);
+        if (!$lines) {
+            return $normalized;
+        }
+
+        $dateTargets = [
+            ['patient', 'birth_date', ['生年月日', '誕生日']],
+            ['prescription', 'issued_on', ['交付年月日', '発行年月日', '処方箋交付年月日']],
+            ['prescription', 'received_on', ['受付年月日', '受付日']],
+            ['prescription', 'expires_on', ['使用期間', '処方箋使用期間', '有効期間']],
+        ];
+        foreach ($dateTargets as [$section, $key, $labels]) {
+            $raw = $this->extractValueAfterLabel($lines, $labels);
+            if ($raw === '') {
+                continue;
+            }
+            $date = PrescriptionReferenceRuleService::normalizeDate($raw);
+            if (!is_string($date['normalized'] ?? null) || (string)$date['normalized'] === '') {
+                continue;
+            }
+            $current = trim((string)($normalized[$section][$key] ?? ''));
+            $fromRaw = (string)$date['normalized'];
+            $currentDate = $current !== '' ? PrescriptionReferenceRuleService::normalizeDate($current) : null;
+            $currentNormalized = is_array($currentDate) && is_string($currentDate['normalized'] ?? null) ? (string)$currentDate['normalized'] : '';
+
+            // OCR生テキストに元号が見えている場合は、構造化AIが西暦へ誤変換していてもPHP側の和暦表を優先する。
+            if ($current === '' || $currentNormalized === '' || $currentNormalized !== $fromRaw || preg_match('/(明治|大正|昭和|平成|令和|[MTSHRmtsr]\s*\d+)/u', $raw) === 1) {
+                $normalized[$section][$key] = $fromRaw;
+                $normalized[$section][$key . '_raw_ocr'] = $raw;
+                if ($current !== '' && $currentNormalized !== '' && $currentNormalized !== $fromRaw) {
+                    $normalized[$section]['needs_human_check'] = true;
+                    $normalized['warnings'][] = $this->fieldLabelForPath($section . '.' . $key) . ': OCR生テキスト「' . $raw . '」を和暦表で' . $fromRaw . 'へ補正しました。元のAI値は' . $current . 'です。';
+                }
+            }
+        }
+
+        $insuranceRaw = $this->extractValueAfterLabel($lines, ['保険者番号']);
+        if ($insuranceRaw !== '') {
+            $normalized['insurance']['insurance_no_raw_ocr'] = $insuranceRaw;
+            // 保険者番号は6桁/8桁のみ。公費や記号番号とは混ぜない。
+            $result = PrescriptionReferenceRuleService::validateCode('insurance_no', $insuranceRaw);
+            if (!empty($result['valid']) || trim((string)($normalized['insurance']['insurance_no'] ?? '')) === '') {
+                $normalized['insurance']['insurance_no'] = !empty($result['valid']) ? (string)$result['digits'] : PrescriptionReferenceRuleService::digitsOnly($insuranceRaw);
+            }
+        }
+
+        $symbolRaw = $this->extractValueAfterLabel($lines, ['被保険者証の記号番号', '被保険者証記号番号', '記号・番号', '記号番号', '保険証番号', '被保険者証番号'], ['受給者番号', '公費']);
+        if ($symbolRaw !== '') {
+            $normalized['insurance']['insured_symbol_number_raw_ocr'] = $symbolRaw;
+            $normalized['insurance']['insured_symbol_number'] = $symbolRaw;
+        }
+
+        $publicPayerRaw = $this->extractValueAfterLabel($lines, ['公費負担者番号', '公費負担番号']);
+        if ($publicPayerRaw !== '') {
+            $normalized['public_expense']['payer_no_raw_ocr'] = $publicPayerRaw;
+            $check = PrescriptionReferenceRuleService::validateCode('public_payer_no', $publicPayerRaw);
+            $normalized['public_expense']['payer_no'] = !empty($check['valid']) ? (string)$check['digits'] : PrescriptionReferenceRuleService::digitsOnly($publicPayerRaw);
+        }
+
+        $publicBeneficiaryRaw = $this->extractValueAfterLabel($lines, ['公費負担医療の受給者番号', '公費受給者番号', '受給者番号']);
+        if ($publicBeneficiaryRaw !== '') {
+            $normalized['public_expense']['beneficiary_no_raw_ocr'] = $publicBeneficiaryRaw;
+            $check = PrescriptionReferenceRuleService::validateCode('public_beneficiary_no', $publicBeneficiaryRaw);
+            $normalized['public_expense']['beneficiary_no'] = !empty($check['valid']) ? (string)$check['digits'] : PrescriptionReferenceRuleService::digitsOnly($publicBeneficiaryRaw);
+            if (trim((string)($normalized['insurance']['insured_symbol_number'] ?? '')) === trim($publicBeneficiaryRaw)) {
+                $normalized['insurance']['insured_symbol_number'] = '';
+                $normalized['insurance']['needs_human_check'] = true;
+                $normalized['warnings'][] = '記号番号: 公費受給者番号を誤って入れている可能性があるため空欄に戻しました。原画像を確認してください。';
+            }
+        }
+
+        $institutionCodeRaw = $this->extractValueAfterLabel($lines, ['医療機関コード', '医療機関等コード', '保険医療機関コード']);
+        if ($institutionCodeRaw !== '') {
+            $normalized['medical_institution']['code_raw_ocr'] = $institutionCodeRaw;
+            $check = PrescriptionReferenceRuleService::validateCode('medical_institution_code', $institutionCodeRaw);
+            if (!empty($check['valid']) || trim((string)($normalized['medical_institution']['code'] ?? '')) === '') {
+                $normalized['medical_institution']['code'] = !empty($check['valid']) ? (string)$check['digits'] : PrescriptionReferenceRuleService::digitsOnly($institutionCodeRaw);
+            }
+        }
+
+        return $normalized;
+    }
+
+    /** @param array<string,mixed> $normalized @return array<int,string> */
+    private function ocrSourceLines(array $normalized): array
+    {
+        $lines = [];
+        $raw = (string)($normalized['_ocr_raw_text'] ?? '');
+        if ($raw !== '') {
+            foreach (preg_split('/\R+/u', $raw) ?: [] as $line) {
+                $line = trim((string)$line);
+                if ($line !== '') {
+                    $lines[] = $line;
+                }
+            }
+        }
+        $structured = is_array($normalized['_ocr_structured_json'] ?? null) ? $normalized['_ocr_structured_json'] : [];
+        foreach ((array)($structured['lines'] ?? []) as $line) {
+            if (is_array($line)) {
+                $text = trim((string)($line['text'] ?? ''));
+            } else {
+                $text = trim((string)$line);
+            }
+            if ($text !== '') {
+                $lines[] = $text;
+            }
+        }
+        foreach ((array)($structured['blocks'] ?? []) as $block) {
+            $text = is_array($block) ? trim((string)($block['text'] ?? '')) : trim((string)$block);
+            if ($text === '') {
+                continue;
+            }
+            foreach (preg_split('/\R+/u', $text) ?: [] as $line) {
+                $line = trim((string)$line);
+                if ($line !== '') {
+                    $lines[] = $line;
+                }
+            }
+        }
+        return array_values(array_unique($lines));
+    }
+
+    /** @param array<int,string> $lines @param array<int,string> $labels @param array<int,string> $excludeLabels */
+    private function extractValueAfterLabel(array $lines, array $labels, array $excludeLabels = []): string
+    {
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if ($line === '') {
+                continue;
+            }
+            $compact = preg_replace('/\s+/u', '', $line) ?? $line;
+            $excluded = false;
+            foreach ($excludeLabels as $exclude) {
+                if ($exclude !== '' && str_contains($compact, preg_replace('/\s+/u', '', $exclude) ?? $exclude)) {
+                    $excluded = true;
+                    break;
+                }
+            }
+            if ($excluded) {
+                continue;
+            }
+            foreach ($labels as $label) {
+                $labelCompact = preg_replace('/\s+/u', '', $label) ?? $label;
+                if ($labelCompact === '' || !str_contains($compact, $labelCompact)) {
+                    continue;
+                }
+                $pattern = '/^.*?' . preg_quote($label, '/') . '[：:\s　]*([^\r\n]*)$/u';
+                if (preg_match($pattern, $line, $m)) {
+                    $value = trim((string)($m[1] ?? ''));
+                    if ($value !== '') {
+                        return $this->cleanExtractedValue($value);
+                    }
+                }
+                $pos = mb_strpos($compact, $labelCompact);
+                if ($pos !== false) {
+                    $value = mb_substr($compact, $pos + mb_strlen($labelCompact));
+                    if ($value !== '') {
+                        return $this->cleanExtractedValue($value);
+                    }
+                }
+            }
+        }
+        return '';
+    }
+
+    private function cleanExtractedValue(string $value): string
+    {
+        $value = trim($value);
+        $value = preg_replace('/^[：:\-ー－\s　]+/u', '', $value) ?? $value;
+        return trim($value);
+    }
+
+    private function fieldLabelForPath(string $path): string
+    {
+        return match ($path) {
+            'patient.birth_date' => '生年月日',
+            'prescription.issued_on' => '交付年月日',
+            'prescription.received_on' => '受付年月日',
+            'prescription.expires_on' => '処方箋使用期間',
+            default => $path,
+        };
+    }
+
     /** @param array<string,mixed> $normalized @return array<string,mixed> */
     private function applyReferenceValidation(array $normalized): array
     {
@@ -95,7 +286,7 @@ final class PrescriptionFieldPostProcessorService
             return $normalized;
         }
 
-        foreach ([['patient','birth_date'], ['prescription','issued_on'], ['prescription','expires_on']] as [$section, $key]) {
+        foreach ([['patient','birth_date'], ['prescription','issued_on'], ['prescription','received_on'], ['prescription','expires_on']] as [$section, $key]) {
             $raw = trim((string)($normalized[$section][$key] ?? ''));
             if ($raw === '') {
                 continue;
@@ -244,6 +435,7 @@ final class PrescriptionFieldPostProcessorService
         $this->addCode($v, 'public_expense.payer_no', '公費負担者番号', (string)($normalized['public_expense']['payer_no'] ?? ''), 'public_payer_no', false, 50);
         $this->addCode($v, 'public_expense.beneficiary_no', '公費負担医療の受給者番号', (string)($normalized['public_expense']['beneficiary_no'] ?? ''), 'public_beneficiary_no', false, 60);
         $this->addDate($v, 'prescription.issued_on', '交付年月日', (string)($normalized['prescription']['issued_on'] ?? ''), true, 70);
+        $this->addDate($v, 'prescription.received_on', '受付年月日', (string)($normalized['prescription']['received_on'] ?? ''), false, 75);
         $this->addRequired($v, 'medical_institution.name', '保険医療機関の名称', (string)($normalized['medical_institution']['name'] ?? ''), 80);
         $this->addCode($v, 'medical_institution.code', '医療機関コード', (string)($normalized['medical_institution']['code'] ?? ''), 'medical_institution_code', true, 90);
         $this->addRequired($v, 'medical_institution.doctor_name', '保険医氏名', (string)($normalized['medical_institution']['doctor_name'] ?? ''), 100, true);
@@ -391,8 +583,14 @@ final class PrescriptionFieldPostProcessorService
             return;
         }
         $result = PrescriptionReferenceRuleService::validateCode($type, $value);
-        $ok = !empty($result['valid']);
-        $out[] = $this->validation($key, $label, $value, $ok ? 'ok' : 'ng', $ok ? 96 : 5, !$ok, $ok ? ('形式OK: ' . (string)($result['classification'] ?? '')) : (string)($result['message'] ?? 'コード形式不正'), $sortOrder, $required, (string)($result['digits'] ?? ''));
+        $valid = !empty($result['valid']);
+        $needsCheck = !empty($result['needs_human_check']);
+        $status = $valid ? ($needsCheck ? 'review' : 'ok') : 'ng';
+        $score = $valid ? ($needsCheck ? 72 : 96) : 5;
+        $reason = $valid
+            ? ($needsCheck ? (string)($result['message'] ?? '形式補正済み。原画像確認が必要です。') : ('形式OK: ' . (string)($result['classification'] ?? '')))
+            : (string)($result['message'] ?? 'コード形式不正');
+        $out[] = $this->validation($key, $label, $value, $status, $score, $needsCheck || !$valid, $reason, $sortOrder, $required, (string)($result['digits'] ?? ''));
     }
 
     /** @return array<string,mixed> */
@@ -440,6 +638,7 @@ final class PrescriptionFieldPostProcessorService
 
         $add('public_payer_no', '公費負担者番号', 'public_expense', (string)($normalized['public_expense']['payer_no'] ?? ''), 'code', true);
         $add('public_beneficiary_no', '公費負担医療の受給者番号', 'public_expense', (string)($normalized['public_expense']['beneficiary_no'] ?? ''), 'code', true);
+        $add('prescription.received_on', '受付年月日', 'prescription', (string)($normalized['prescription']['received_on'] ?? ''), 'date', false);
         $add('medical_institution_address', '保険医療機関の所在地', 'medical_institution', (string)($normalized['medical_institution']['address'] ?? ''), 'text', false);
         $add('medical_institution_prefecture_no', '都道府県番号', 'medical_institution', (string)($normalized['medical_institution']['prefecture_no'] ?? ''), 'code', false);
         $add('medical_institution_score_table_no', '点数表番号', 'medical_institution', (string)($normalized['medical_institution']['score_table_no'] ?? ''), 'code', false);

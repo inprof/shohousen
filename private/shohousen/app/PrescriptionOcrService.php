@@ -108,15 +108,28 @@ final class PrescriptionOcrService
             $ai = $openaiClient->extractFromImage($ocrStored['path'], $ocrStored['mime_type'], null);
             $openaiMs = self::elapsedMs($openaiStart);
             $normalized = is_array($ai['normalized'] ?? null) ? $ai['normalized'] : [];
+            $normalized['_ocr_raw_text'] = (string)($ai['ocr_raw_text'] ?? '');
+            $normalized['_ocr_structured_json'] = is_array($ai['ocr_structured_json'] ?? null) ? $ai['ocr_structured_json'] : [];
             $aiNormalized = $normalized;
             if (class_exists('PrescriptionFieldPostProcessorService')) {
                 $normalized = (new PrescriptionFieldPostProcessorService())->process($normalized);
+            }
+            if (class_exists('PrescriptionOcrFieldAutoRepairService')) {
+                $normalized = (new PrescriptionOcrFieldAutoRepairService())->repairIfNeeded(
+                    $openaiClient,
+                    $ocrStored['path'],
+                    $ocrStored['mime_type'],
+                    $normalized,
+                    $ai,
+                    is_array($ai['ocr_structured_json'] ?? null) ? $ai['ocr_structured_json'] : []
+                );
             }
             if (class_exists('PrescriptionOcrAttemptService')) {
                 $normalized = (new PrescriptionOcrAttemptService())->attachFirstAttempt($normalized, $ai, [
                     'model_name' => $modelSummaryText,
                     'ocr_storage_file_id' => (int)($ocrStored['storage_file_id'] ?? 0),
                     'ocr_image_bytes' => (int)($ocrStored['size'] ?? 0),
+                    'auto_field_retry_count' => (int)($normalized['_auto_field_retry_count'] ?? 0),
                 ]);
             }
             if (class_exists('PrescriptionOcrDatasetService')) {
@@ -180,10 +193,20 @@ final class PrescriptionOcrService
                 'post_processor' => 'PrescriptionFieldPostProcessorService',
                 'created_by_user_id' => (int)$user['id'],
             ]);
+            if (!empty($normalized['_auto_field_repair'])) {
+                $debug->saveSnapshot($tenantId, $jobId, null, 'auto_field_repair', '項目別AI再確認: PHP検証NG項目だけ2回目確認', $normalized['_auto_field_repair'], [
+                    'model_name' => (string)($normalized['_auto_field_repair']['model'] ?? $modelSummaryText),
+                    'model_tier' => $modelSummary,
+                    'minimal_analysis' => true,
+                    'post_processor' => 'PrescriptionOcrFieldAutoRepairService',
+                    'created_by_user_id' => (int)$user['id'],
+                ]);
+            }
 
             $rawResponse = is_array($ai['raw'] ?? null) ? $ai['raw'] : [];
             $rawResponse['minimal_analysis'] = true;
             $rawResponse['model_tier'] = $modelSummary;
+            $rawResponse['auto_field_repair'] = $normalized['_auto_field_repair'] ?? null;
 
             $stmt = $pdo->prepare('UPDATE prescription_parse_jobs
                 SET status = "needs_review", model_name = :model_name, raw_response_json = :raw, normalized_json = :normalized,
@@ -311,6 +334,8 @@ final class PrescriptionOcrService
             $ai = $openaiClient->extractFromImage($stored['path'], $stored['mime_type'], null);
             $aiNormalized = is_array($ai['normalized'] ?? null) ? $ai['normalized'] : [];
             $newNormalized = $aiNormalized;
+            $newNormalized['_ocr_raw_text'] = (string)($ai['ocr_raw_text'] ?? '');
+            $newNormalized['_ocr_structured_json'] = is_array($ai['ocr_structured_json'] ?? null) ? $ai['ocr_structured_json'] : [];
             if (class_exists('PrescriptionFieldPostProcessorService')) {
                 $newNormalized = (new PrescriptionFieldPostProcessorService())->process($newNormalized);
             }
