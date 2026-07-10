@@ -424,3 +424,76 @@ select.validation-missing {
   border: 1px solid #dc2626;
   border-radius: 12px;
 }
+
+/* 処方箋ルール判定を通常は折りたたむ */
+.rule-check-collapsible .rule-summary {
+  align-items: center;
+}
+.rule-check-collapsible [data-toggle-rule-checks] {
+  margin-left: 4px;
+}
+.rule-check-collapsible [hidden] {
+  display: none !important;
+}
+
+/* 読み取り項目の状態色: 必須未入力=薄赤、要確認=黄、問題なし=白 */
+.review-field-row.field-row-ok {
+  border-color: var(--line);
+  background: #fff;
+}
+.review-field-row.field-row-required-missing,
+.review-field-row.validation-missing {
+  border-color: #fca5a5;
+  background: #fff1f2;
+  box-shadow: inset 4px 0 0 #f87171;
+}
+.review-field-row.field-row-review,
+.review-field-row.validation-review {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  box-shadow: inset 4px 0 0 #f59e0b;
+}
+.review-field-row.field-row-required-missing .review-field-grid input,
+.review-field-row.field-row-required-missing .review-field-grid textarea,
+.review-field-row.field-row-required-missing .review-field-grid select,
+.review-field-row.validation-missing .review-field-grid input,
+.review-field-row.validation-missing .review-field-grid textarea,
+.review-field-row.validation-missing .review-field-grid select {
+  border-color: #fca5a5;
+  background: #fff7f7;
+}
+.review-field-row.field-row-review .review-field-grid input,
+.review-field-row.field-row-review .review-field-grid textarea,
+.review-field-row.field-row-review .review-field-grid select,
+.review-field-row.validation-review .review-field-grid input,
+.review-field-row.validation-review .review-field-grid textarea,
+.review-field-row.validation-review .review-field-grid select {
+  border-color: #fbbf24;
+  background: #fffdf3;
+}
+.field-meta .required-missing-badge {
+  background: #fee2e2;
+  color: #b91c1c;
+  font-weight: 800;
+}
+.field-meta .review-badge,
+.field-meta .normalized-badge {
+  background: #fef3c7;
+  color: #92400e;
+  font-weight: 800;
+}
+.field-meta .review-reason {
+  max-width: 100%;
+  background: #fff7ed;
+  color: #9a3412;
+}
+.validation-review .validation-message {
+  color: #92400e;
+}
+.validation-review input,
+.validation-review textarea,
+.validation-review select {
+  border-color: #f59e0b !important;
+  background: #fffdf3;
+  box-shadow: 0 0 0 3px rgba(245, 158, 11, .14);
+}
