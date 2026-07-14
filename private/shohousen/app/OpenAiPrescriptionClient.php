@@ -438,8 +438,406 @@ final class OpenAiPrescriptionClient
 
 
     /**
+     * 画像から患者値を取得せず、処方箋帳票の固定ラベル・区画・候補座標だけを抽出する単一タスク。
+     *
+     * @return array{raw:array<string,mixed>,template:array<string,mixed>,model:string}
+     */
+    public function extractTemplateFromImage(string $imagePath, string $mimeType): array
+    {
+        $apiKey = trim((string)app_config('openai.api_key', ''));
+        if ($apiKey === '') {
+            if ((bool)app_config('app.demo_mode', false)) {
+                return [
+                    'raw' => ['demo' => true, 'stage' => 'template_structure'],
+                    'template' => [
+                        'page_orientation' => 'unknown',
+                        'template_kind' => 'unknown',
+                        'fixed_labels' => [],
+                        'sections' => [],
+                        'frame_notes' => [],
+                        'warnings' => ['demo_mode'],
+                        'overall_confidence' => 0,
+                    ],
+                    'model' => 'demo',
+                ];
+            }
+            throw new RuntimeException('OpenAI APIキーが未設定です。');
+        }
+
+        $base64 = base64_encode((string)file_get_contents($imagePath));
+        $detail = (string)app_config('prescription_single_task_analysis.template_vision_detail', 'low');
+        $model = $this->modelForStage('ocr');
+        $payload = [
+            'model' => $model,
+            'input' => [
+                [
+                    'role' => 'system',
+                    'content' => [
+                        ['type' => 'input_text', 'text' => self::templateSystemPrompt()],
+                    ],
+                ],
+                [
+                    'role' => 'user',
+                    'content' => [
+                        ['type' => 'input_text', 'text' => 'この画像の処方箋テンプレート構造だけを抽出してください。患者名、番号、日付、薬剤名、医師名などの実値は絶対に出力しないでください。'],
+                        [
+                            'type' => 'input_image',
+                            'image_url' => 'data:' . $mimeType . ';base64,' . $base64,
+                            'detail' => in_array($detail, ['low', 'high', 'auto'], true) ? $detail : 'high',
+                        ],
+                    ],
+                ],
+            ],
+            'text' => [
+                'format' => [
+                    'type' => 'json_schema',
+                    'name' => 'prescription_template_structure',
+                    'strict' => true,
+                    'schema' => self::templateResponseSchema(),
+                ],
+            ],
+            'max_output_tokens' => (int)app_config('prescription_single_task_analysis.template_max_output_tokens', 3500),
+        ];
+
+        $response = $this->postJson(
+            'https://api.openai.com/v1/responses',
+            $payload,
+            $apiKey,
+            (int)app_config('prescription_single_task_analysis.template_timeout_seconds', 120)
+        );
+        $jsonText = self::extractOutputText($response);
+        $template = json_decode($jsonText, true);
+        if (!is_array($template)) {
+            throw new OpenAiPrescriptionJsonParseException(
+                '処方箋テンプレート構造JSONの解析に失敗しました。',
+                $response,
+                $jsonText,
+                json_last_error_msg()
+            );
+        }
+
+        return [
+            'raw' => $response,
+            'template' => self::normalizeTemplateObservation($template),
+            'model' => $model,
+        ];
+    }
+
+    /**
+     * OCR済みテキストを根拠に、1リクエスト1項目で処方箋項目を抽出する。
+     * 画像を各項目で再送しないため、画像入力コストを増やさず、低価格モデルの指示混線を抑える。
+     *
+     * @param array<int,array<string,mixed>> $tasks
+     * @return array<string,mixed>
+     */
+    public function extractSingleTaskFieldsFromOcr(array $tasks): array
+    {
+        $apiKey = trim((string)app_config('openai.api_key', ''));
+        $model = $this->modelForStage('structure');
+        if ($apiKey === '') {
+            if ((bool)app_config('app.demo_mode', false)) {
+                return [
+                    'results' => [],
+                    'raw_responses' => [],
+                    'errors' => ['demo_mode'],
+                    'model' => 'demo',
+                ];
+            }
+            throw new RuntimeException('OpenAI APIキーが未設定です。');
+        }
+
+        $requests = [];
+        foreach ($tasks as $task) {
+            if (!is_array($task)) {
+                continue;
+            }
+            $taskId = trim((string)($task['task_id'] ?? ''));
+            if ($taskId === '') {
+                continue;
+            }
+            $responseType = (string)($task['response_type'] ?? 'scalar');
+            $schema = $responseType === 'medications'
+                ? self::singleMedicationTaskResponseSchema()
+                : self::singleFieldTaskResponseSchema();
+            $maxTokens = $responseType === 'medications'
+                ? (int)app_config('prescription_single_task_analysis.medication_max_output_tokens', 5000)
+                : (int)app_config('prescription_single_task_analysis.field_max_output_tokens', 700);
+
+            $requests[$taskId] = [
+                'payload' => [
+                    'model' => $model,
+                    'input' => [
+                        [
+                            'role' => 'system',
+                            'content' => [
+                                ['type' => 'input_text', 'text' => self::singleTaskSystemPrompt($responseType)],
+                            ],
+                        ],
+                        [
+                            'role' => 'user',
+                            'content' => [
+                                ['type' => 'input_text', 'text' => json_encode([
+                                    'single_task' => (string)($task['question'] ?? ''),
+                                    'field_key' => (string)($task['field_key'] ?? ''),
+                                    'field_label' => (string)($task['field_label'] ?? ''),
+                                    'ocr_evidence' => $task['evidence'] ?? [],
+                                    'rules' => [
+                                        'perform_only_this_one_task' => true,
+                                        'do_not_infer_missing_values' => true,
+                                        'return_empty_when_not_visible' => true,
+                                        'preserve_original_wareki_and_digits' => true,
+                                    ],
+                                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE)],
+                            ],
+                        ],
+                    ],
+                    'text' => [
+                        'format' => [
+                            'type' => 'json_schema',
+                            'name' => self::schemaName('single_' . $taskId),
+                            'strict' => true,
+                            'schema' => $schema,
+                        ],
+                    ],
+                    'max_output_tokens' => max(200, $maxTokens),
+                ],
+                'timeout_seconds' => (int)app_config('prescription_single_task_analysis.field_timeout_seconds', 90),
+            ];
+        }
+
+        $parallelism = max(1, min(10, (int)app_config('prescription_single_task_analysis.parallelism', 6)));
+        $batch = $this->postJsonBatch('https://api.openai.com/v1/responses', $requests, $apiKey, $parallelism);
+        $results = [];
+        $raw = [];
+        $errors = [];
+        foreach ($batch as $taskId => $row) {
+            if (!is_array($row) || empty($row['ok']) || !is_array($row['response'] ?? null)) {
+                $errors[$taskId] = (string)($row['error'] ?? 'OpenAI単一タスクに失敗しました。');
+                continue;
+            }
+            $response = $row['response'];
+            $raw[$taskId] = $response;
+            try {
+                $jsonText = self::extractOutputText($response);
+                $decoded = json_decode($jsonText, true);
+                if (!is_array($decoded)) {
+                    throw new RuntimeException(json_last_error_msg());
+                }
+                $results[$taskId] = $decoded;
+            } catch (Throwable $e) {
+                $errors[$taskId] = 'JSON解析失敗: ' . $e->getMessage();
+            }
+        }
+
+        return [
+            'results' => $results,
+            'raw_responses' => $raw,
+            'errors' => $errors,
+            'model' => $model,
+            'request_count' => count($requests),
+        ];
+    }
+
+    private static function templateSystemPrompt(): string
+    {
+        return <<<'PROMPT'
+あなたは日本の処方箋帳票テンプレート抽出専用エンジンです。
+今回の仕事は「帳票の固定構造だけを取得すること」1つだけです。
+
+厳守:
+- 患者氏名、患者住所、生年月日の実値、保険番号、公費番号、日付実値、薬剤名、用法、医師名などの個別値は出力しない。
+- 固定ラベル文字、区画名、罫線・枠の構造、固定ラベルのおおよその位置比率だけを返す。
+- 固定ラベルに見えない自由記載や手書き文字は fixed_labels に入れない。
+- label_x_ratio/label_y_ratio/label_w_ratio/label_h_ratio は固定ラベル文字の領域です。
+- value_x_ratio/value_y_ratio/value_w_ratio/value_h_ratio は、そのラベルに対応する記入値・印字値の欄領域です。
+- いずれも画像左上を0,0、右下を1,1とした概算値。値欄を特定できない場合は value_* を0にしてください。
+- canonical_field_key は既知の固定項目だけを使い、不明ラベルは other とする。
+- JSON Schema以外の文章は出力しない。
+PROMPT;
+    }
+
+    private static function singleTaskSystemPrompt(string $responseType): string
+    {
+        if ($responseType === 'medications') {
+            return <<<'PROMPT'
+あなたは日本の処方箋OCR結果から「処方薬情報だけ」を抽出する専用エンジンです。
+今回の仕事は処方薬情報の抽出1つだけです。他の患者・保険・医療機関項目は扱わないでください。
+OCR根拠に存在しない文字や薬剤を作らず、印字順、改行、総量、用法、日数、使用部位、使用条件を省略しないでください。
+外用薬・点眼薬・頓服などを錠数×回数×日数へ無理に変換しないでください。
+JSON Schema以外の文章は出力しないでください。
+PROMPT;
+        }
+
+        return <<<'PROMPT'
+あなたは日本の処方箋OCR結果から指定された「1項目だけ」を抽出する専用エンジンです。
+ユーザーが指定した1項目以外を判断・出力しないでください。
+OCR根拠に値が無い、読めない、別欄と区別できない場合は found=false、value="" としてください。
+和暦、番号、記号、ハイフン等は勝手に変換・補完・削除せず、OCR上の元表記を返してください。
+候補が複数ある場合は推測で選ばず needs_human_check=true にしてください。
+JSON Schema以外の文章は出力しないでください。
+PROMPT;
+    }
+
+    /** @return array<string,mixed> */
+    private static function singleFieldTaskResponseSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => ['found', 'value', 'raw_text', 'source_section', 'source_line_numbers', 'confidence', 'needs_human_check', 'reason'],
+            'properties' => [
+                'found' => ['type' => 'boolean'],
+                'value' => ['type' => 'string'],
+                'raw_text' => ['type' => 'string'],
+                'source_section' => ['type' => 'string'],
+                'source_line_numbers' => ['type' => 'array', 'items' => ['type' => 'integer']],
+                'confidence' => ['type' => 'number'],
+                'needs_human_check' => ['type' => 'boolean'],
+                'reason' => ['type' => 'string'],
+            ],
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private static function singleMedicationTaskResponseSchema(): array
+    {
+        return [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => ['items', 'confidence', 'needs_human_check', 'reason'],
+            'properties' => [
+                'items' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'additionalProperties' => false,
+                        'required' => ['drug_name', 'generic_name', 'brand_name', 'raw_drug_text', 'name_relation', 'dose_text', 'usage_text', 'days_count', 'amount_text', 'confidence', 'needs_human_check', 'reason'],
+                        'properties' => [
+                            'drug_name' => ['type' => 'string'],
+                            'generic_name' => ['type' => 'string'],
+                            'brand_name' => ['type' => 'string'],
+                            'raw_drug_text' => ['type' => 'string'],
+                            'name_relation' => ['type' => 'string', 'enum' => ['single', 'generic_brand_pair', 'multiple_candidates', 'unknown']],
+                            'dose_text' => ['type' => 'string'],
+                            'usage_text' => ['type' => 'string'],
+                            'days_count' => ['type' => ['integer', 'null']],
+                            'amount_text' => ['type' => 'string'],
+                            'confidence' => ['type' => 'number'],
+                            'needs_human_check' => ['type' => 'boolean'],
+                            'reason' => ['type' => 'string'],
+                        ],
+                    ],
+                ],
+                'confidence' => ['type' => 'number'],
+                'needs_human_check' => ['type' => 'boolean'],
+                'reason' => ['type' => 'string'],
+            ],
+        ];
+    }
+
+    /** @return array<string,mixed> */
+    private static function templateResponseSchema(): array
+    {
+        $region = [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => [
+                'label_text', 'canonical_field_key', 'source_section',
+                'label_x_ratio', 'label_y_ratio', 'label_w_ratio', 'label_h_ratio',
+                'value_x_ratio', 'value_y_ratio', 'value_w_ratio', 'value_h_ratio',
+                'confidence'
+            ],
+            'properties' => [
+                'label_text' => ['type' => 'string'],
+                'canonical_field_key' => ['type' => 'string'],
+                'source_section' => ['type' => 'string'],
+                'label_x_ratio' => ['type' => 'number'],
+                'label_y_ratio' => ['type' => 'number'],
+                'label_w_ratio' => ['type' => 'number'],
+                'label_h_ratio' => ['type' => 'number'],
+                'value_x_ratio' => ['type' => 'number'],
+                'value_y_ratio' => ['type' => 'number'],
+                'value_w_ratio' => ['type' => 'number'],
+                'value_h_ratio' => ['type' => 'number'],
+                'confidence' => ['type' => 'number'],
+            ],
+        ];
+        return [
+            'type' => 'object',
+            'additionalProperties' => false,
+            'required' => ['page_orientation', 'template_kind', 'fixed_labels', 'sections', 'frame_notes', 'warnings', 'overall_confidence'],
+            'properties' => [
+                'page_orientation' => ['type' => 'string', 'enum' => ['portrait', 'landscape', 'unknown']],
+                'template_kind' => ['type' => 'string'],
+                'fixed_labels' => ['type' => 'array', 'items' => $region],
+                'sections' => [
+                    'type' => 'array',
+                    'items' => [
+                        'type' => 'object',
+                        'additionalProperties' => false,
+                        'required' => ['section_name', 'x_ratio', 'y_ratio', 'w_ratio', 'h_ratio', 'confidence'],
+                        'properties' => [
+                            'section_name' => ['type' => 'string'],
+                            'x_ratio' => ['type' => 'number'],
+                            'y_ratio' => ['type' => 'number'],
+                            'w_ratio' => ['type' => 'number'],
+                            'h_ratio' => ['type' => 'number'],
+                            'confidence' => ['type' => 'number'],
+                        ],
+                    ],
+                ],
+                'frame_notes' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'warnings' => ['type' => 'array', 'items' => ['type' => 'string']],
+                'overall_confidence' => ['type' => 'number'],
+            ],
+        ];
+    }
+
+    /** @param array<string,mixed> $template @return array<string,mixed> */
+    private static function normalizeTemplateObservation(array $template): array
+    {
+        foreach (['fixed_labels', 'sections'] as $listKey) {
+            $rows = [];
+            foreach ((array)($template[$listKey] ?? []) as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                foreach ([
+                    'x_ratio', 'y_ratio', 'w_ratio', 'h_ratio',
+                    'label_x_ratio', 'label_y_ratio', 'label_w_ratio', 'label_h_ratio',
+                    'value_x_ratio', 'value_y_ratio', 'value_w_ratio', 'value_h_ratio'
+                ] as $ratioKey) {
+                    if (!array_key_exists($ratioKey, $row)) {
+                        continue;
+                    }
+                    $row[$ratioKey] = is_numeric($row[$ratioKey] ?? null)
+                        ? max(0.0, min(1.0, (float)$row[$ratioKey]))
+                        : 0.0;
+                }
+                if (isset($row['confidence'])) {
+                    $row['confidence'] = self::normalizeConfidencePercent($row['confidence']);
+                }
+                $rows[] = $row;
+            }
+            $template[$listKey] = $rows;
+        }
+        $template['frame_notes'] = array_values(array_filter(array_map('strval', (array)($template['frame_notes'] ?? []))));
+        $template['warnings'] = array_values(array_filter(array_map('strval', (array)($template['warnings'] ?? []))));
+        $template['overall_confidence'] = self::normalizeConfidencePercent($template['overall_confidence'] ?? 0);
+        $template['privacy_level'] = 'fixed_labels_and_geometry_only_no_values';
+        $template['status'] = 'candidate';
+        return $template;
+    }
+
+    private static function schemaName(string $value): string
+    {
+        $value = preg_replace('/[^a-zA-Z0-9_]+/', '_', $value) ?: 'single_task';
+        return substr($value, 0, 60);
+    }
+
+    /**
      * PHP検証でNG/判定不能になった主要項目だけを、同じ画像から再確認する。
-     * 初回OCR全体をやり直すのではなく、対象項目を絞ってgpt-4o-miniへ再読取させる。
+     * 単一タスクモードでは1リクエスト1項目へ自動分割する。
      *
      * @param array<string,mixed> $currentNormalized
      * @param array<int,array<string,mixed>> $targetFields
@@ -457,6 +855,39 @@ final class OpenAiPrescriptionClient
         }
         if (!$targetFields) {
             return ['fields' => [], 'warnings' => [], 'overall_confidence' => 0, 'raw_response' => [], 'model' => $this->modelForStage('ocr')];
+        }
+
+        // 低価格モデルでは複数項目を同時に判断させず、1リクエスト1項目へ分割する。
+        if ((bool)app_config('prescription_single_task_analysis.enabled', true) && count($targetFields) > 1) {
+            $fields = [];
+            $warnings = [];
+            $rawResponses = [];
+            $confidence = [];
+            $model = $this->modelForStage('ocr');
+            foreach ($targetFields as $index => $targetField) {
+                if (!is_array($targetField)) {
+                    continue;
+                }
+                try {
+                    $single = $this->repairCoreFieldsFromImage($imagePath, $mimeType, $currentNormalized, [$targetField], $ocrStructured);
+                    $fields = array_merge($fields, is_array($single['fields'] ?? null) ? $single['fields'] : []);
+                    $warnings = array_merge($warnings, array_map('strval', (array)($single['warnings'] ?? [])));
+                    if (is_numeric($single['overall_confidence'] ?? null)) {
+                        $confidence[] = (float)$single['overall_confidence'];
+                    }
+                    $rawResponses[(string)($targetField['field_key'] ?? ('field_' . $index))] = $single['raw_response'] ?? [];
+                    $model = (string)($single['model'] ?? $model);
+                } catch (Throwable $e) {
+                    $warnings[] = (string)($targetField['field_label'] ?? $targetField['field_key'] ?? '項目') . ': ' . $e->getMessage();
+                }
+            }
+            return [
+                'fields' => $fields,
+                'warnings' => array_values(array_unique($warnings)),
+                'overall_confidence' => $confidence ? array_sum($confidence) / count($confidence) : 0,
+                'raw_response' => ['single_task_responses' => $rawResponses],
+                'model' => $model,
+            ];
         }
 
         $base64 = base64_encode((string)file_get_contents($imagePath));
@@ -550,18 +981,17 @@ final class OpenAiPrescriptionClient
     private static function fieldRepairSystemPrompt(): string
     {
         return <<<PROMPT
-あなたは日本の処方箋OCRの「項目別再確認」担当です。
-PHP検証でNG/判定不能になった target_fields だけを、画像とOCR生テキストから再確認してください。
+あなたは日本の処方箋OCRの「単一項目再確認」担当です。
+target_fields には必ず1項目だけが入ります。その1項目だけを画像から読み直してください。
 
 厳守:
 - target_fields に無い項目は返さないでください。
 - 読めない項目は value を空文字にし、reason に読めない理由を入れてください。
-- 和暦は和暦表で西暦YYYY-MM-DDへ変換してください。令和8年は2026年です。平成/昭和/大正/明治も同様に元号年から変換してください。
+- 和暦は西暦へ変換せず、画像上の元表記を raw_text と value に残してください。変換はPHP側で行います。
+- 数字の追加、削除、桁合わせをしないでください。画像に見えた値をそのまま返してください。
 - 受付年月日、交付年月日、生年月日を混同しないでください。
-- 保険者番号は6桁または8桁だけです。10桁や9桁の場合は別欄混入の可能性があるため、画像上の保険者番号欄だけを読み直してください。
-- 公費負担者番号は8桁、公費負担医療の受給者番号は7桁です。記号番号へ受給者番号を入れないでください。
-- 医療機関コードは通常7桁、都道府県番号+点数表番号付きなら10桁です。住所の番地や電話番号を医療機関コードにしないでください。
-- 医療機関名、薬局名、住所、電話番号を混同しないでください。
+- 保険者番号、公費負担者番号、公費受給者番号、記号番号を混同しないでください。
+- 医療機関コードでは住所の番地や電話番号を採用しないでください。
 - JSON Schema以外の文章は出力しないでください。
 PROMPT;
     }
@@ -578,6 +1008,107 @@ PROMPT;
             'warnings' => $currentNormalized['warnings'] ?? [],
             'field_validations' => $currentNormalized['field_validations'] ?? [],
         ];
+    }
+
+
+    /**
+     * @param array<string,array{payload:array<string,mixed>,timeout_seconds?:int}> $requests
+     * @return array<string,array<string,mixed>>
+     */
+    private function postJsonBatch(string $url, array $requests, string $apiKey, int $parallelism): array
+    {
+        if (!$requests) {
+            return [];
+        }
+        if (!function_exists('curl_multi_init')) {
+            $out = [];
+            foreach ($requests as $key => $request) {
+                try {
+                    $out[$key] = [
+                        'ok' => true,
+                        'response' => $this->postJson(
+                            $url,
+                            (array)($request['payload'] ?? []),
+                            $apiKey,
+                            (int)($request['timeout_seconds'] ?? app_config('openai.timeout_seconds', 60))
+                        ),
+                    ];
+                } catch (Throwable $e) {
+                    $out[$key] = ['ok' => false, 'error' => $e->getMessage()];
+                }
+            }
+            return $out;
+        }
+
+        $out = [];
+        foreach (array_chunk($requests, max(1, $parallelism), true) as $chunk) {
+            $multi = curl_multi_init();
+            if ($multi === false) {
+                throw new RuntimeException('curl_multi初期化に失敗しました。');
+            }
+            $handles = [];
+            foreach ($chunk as $key => $request) {
+                $ch = curl_init($url);
+                if ($ch === false) {
+                    $out[$key] = ['ok' => false, 'error' => 'curl初期化に失敗しました。'];
+                    continue;
+                }
+                $payloadJson = json_encode(
+                    (array)($request['payload'] ?? []),
+                    JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES | JSON_INVALID_UTF8_SUBSTITUTE
+                );
+                if (!is_string($payloadJson)) {
+                    $out[$key] = ['ok' => false, 'error' => 'OpenAI送信JSONの生成に失敗しました。'];
+                    curl_close($ch);
+                    continue;
+                }
+                curl_setopt_array($ch, [
+                    CURLOPT_RETURNTRANSFER => true,
+                    CURLOPT_POST => true,
+                    CURLOPT_HTTPHEADER => [
+                        'Authorization: Bearer ' . $apiKey,
+                        'Content-Type: application/json',
+                    ],
+                    CURLOPT_POSTFIELDS => $payloadJson,
+                    CURLOPT_TIMEOUT => max(30, (int)($request['timeout_seconds'] ?? app_config('openai.timeout_seconds', 60))),
+                    CURLOPT_CONNECTTIMEOUT => (int)app_config('openai.connect_timeout_seconds', 20),
+                ]);
+                curl_multi_add_handle($multi, $ch);
+                $handles[] = ['key' => $key, 'handle' => $ch];
+            }
+
+            do {
+                $status = curl_multi_exec($multi, $running);
+                if ($running) {
+                    curl_multi_select($multi, 1.0);
+                }
+            } while ($running && $status === CURLM_OK);
+
+            foreach ($handles as $entry) {
+                $key = $entry['key'];
+                $ch = $entry['handle'];
+                $body = curl_multi_getcontent($ch);
+                $httpStatus = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
+                $error = curl_error($ch);
+                if ($body === false || $body === '') {
+                    $out[$key] = ['ok' => false, 'error' => 'OpenAI API通信に失敗しました: ' . $error];
+                } else {
+                    $decoded = json_decode((string)$body, true);
+                    if (!is_array($decoded)) {
+                        $out[$key] = ['ok' => false, 'error' => 'OpenAI APIレスポンスがJSONではありません。HTTP ' . $httpStatus];
+                    } elseif ($httpStatus < 200 || $httpStatus >= 300) {
+                        $message = $decoded['error']['message'] ?? ('HTTP ' . $httpStatus);
+                        $out[$key] = ['ok' => false, 'error' => 'OpenAI APIエラー: ' . $message, 'response' => $decoded];
+                    } else {
+                        $out[$key] = ['ok' => true, 'response' => $decoded];
+                    }
+                }
+                curl_multi_remove_handle($multi, $ch);
+                curl_close($ch);
+            }
+            curl_multi_close($multi);
+        }
+        return $out;
     }
 
     private function postJson(string $url, array $payload, string $apiKey, ?int $timeoutSeconds = null): array

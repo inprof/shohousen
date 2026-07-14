@@ -39,6 +39,97 @@ final class PrescriptionTemplateMaskService
         '記名押印' => 'substitution.doctor_signature_or_seal',
     ];
 
+
+    /**
+     * 初回画像読取時に、個人値を含まないテンプレート候補だけを補助学習DBへ保存する。
+     *
+     * @param array<string,mixed> $sourceImage
+     * @param array<string,mixed> $templateObservation
+     * @param array<string,mixed> $ocrStructured
+     * @return array<string,mixed>
+     */
+    public function saveInitialTemplateLearningAssets(
+        int $tenantId,
+        int $parseJobId,
+        array $sourceImage,
+        array $templateObservation,
+        array $ocrStructured = []
+    ): array {
+        if ($parseJobId <= 0 || !(bool)app_config('prescription_template_learning.enabled', true)) {
+            return ['saved' => false, 'reason' => 'disabled_or_invalid_job'];
+        }
+
+        $sourcePath = (string)($sourceImage['path'] ?? $sourceImage['stored_path'] ?? '');
+        $source = [
+            'stored_path' => $sourcePath,
+            'mime_type' => (string)($sourceImage['mime_type'] ?? ''),
+            'sha256_hash' => (string)($sourceImage['sha256'] ?? $sourceImage['sha256_hash'] ?? ''),
+            'width' => $sourceImage['width'] ?? null,
+            'height' => $sourceImage['height'] ?? null,
+        ];
+        $labelsFromOcr = $this->extractFixedLabels($ocrStructured);
+        $labelsFromTemplate = $this->sanitizeTemplateFixedLabels($templateObservation);
+        $labels = $this->mergeTemplateLabels($labelsFromOcr, $labelsFromTemplate);
+        $context = $this->templateContext($tenantId, $parseJobId, 0, $source, $ocrStructured);
+        $context['label_signature'] = hash('sha256', implode('|', array_map(
+            static fn(array $label): string => (string)($label['field_key'] ?? '') . ':' . (string)($label['label_text'] ?? ''),
+            $labels
+        )));
+        $context['template_hash'] = hash('sha256', (string)($context['line_signature'] ?? '') . '|' . (string)$context['label_signature']);
+        $context['template_ai_confidence'] = is_numeric($templateObservation['overall_confidence'] ?? null)
+            ? (float)$templateObservation['overall_confidence']
+            : null;
+        $context['learning_status'] = 'candidate';
+        $context['privacy_level'] = 'frame_and_fixed_labels_only_no_patient_values';
+
+        $assets = [];
+        if ($sourcePath !== '' && is_file($sourcePath)) {
+            $frame = $this->createFrameOnlyImage($sourcePath, (string)$source['mime_type']);
+            if ($frame) {
+                $assets[] = $this->saveAssetRow($tenantId, $parseJobId, 0, 'frame_only_candidate', $frame, $context + [
+                    'privacy_level' => 'no_text_frame_only',
+                    'source_image_hash' => (string)$source['sha256_hash'],
+                ]);
+            }
+        }
+
+        if ($labels) {
+            $labelPath = $this->writeJsonAsset('label_only_candidate', $tenantId, $parseJobId, 0, [
+                'schema_version' => 'prescription_label_only_candidate_v1',
+                'status' => 'candidate',
+                'privacy_level' => 'fixed_labels_only_no_values',
+                'labels' => $labels,
+                'sections' => array_values((array)($templateObservation['sections'] ?? [])),
+                'frame_notes' => array_values(array_map('strval', (array)($templateObservation['frame_notes'] ?? []))),
+                'context' => $context,
+            ]);
+            $assets[] = $this->saveAssetRow($tenantId, $parseJobId, 0, 'label_only_candidate_json', [
+                'path' => $labelPath,
+                'mime_type' => 'application/json',
+                'sha256' => hash_file('sha256', $labelPath) ?: '',
+                'size' => filesize($labelPath) ?: 0,
+            ], $context + ['label_count' => count($labels), 'privacy_level' => 'fixed_labels_only_no_values']);
+            $this->saveLabelObservations($tenantId, $parseJobId, 0, $labels, $context);
+            $this->saveCandidateRegions($tenantId, $parseJobId, $labels, $context);
+        }
+
+        $summary = [
+            'saved' => true,
+            'status' => 'candidate',
+            'template_hash' => (string)($context['template_hash'] ?? ''),
+            'asset_count' => count($assets),
+            'fixed_label_count' => count($labels),
+            'candidate_region_count' => count(array_filter($labels, static fn(array $row): bool => (float)($row['w_ratio'] ?? 0) > 0 && (float)($row['h_ratio'] ?? 0) > 0)),
+            'assets' => $assets,
+            'privacy_policy' => 'no patient values in knowledge DB',
+        ];
+        $this->trace($tenantId, $parseJobId, 0, 'initial_template_candidate_saved', $summary, [
+            'source_stage' => 'first_image_read',
+            'privacy_policy' => 'frame_only + fixed_labels + candidate_coordinates',
+        ]);
+        return $summary;
+    }
+
     /**
      * @param array<int,array<string,mixed>> $selectedFields
      * @param array<string,mixed> $post
@@ -303,6 +394,141 @@ final class PrescriptionTemplateMaskService
             }
         }
         return $labels;
+    }
+
+
+    /** @param array<string,mixed> $templateObservation @return array<int,array<string,mixed>> */
+    private function sanitizeTemplateFixedLabels(array $templateObservation): array
+    {
+        $labels = [];
+        foreach ((array)($templateObservation['fixed_labels'] ?? []) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $labelText = trim((string)($row['label_text'] ?? ''));
+            if ($labelText === '') {
+                continue;
+            }
+            $fieldKey = $this->whitelistedFieldKey($labelText, (string)($row['canonical_field_key'] ?? ''));
+            if ($fieldKey === '') {
+                continue;
+            }
+            $labels[] = [
+                'field_key' => $fieldKey,
+                'label_text' => mb_substr($labelText, 0, 160),
+                'source_section' => mb_substr((string)($row['source_section'] ?? ''), 0, 80),
+                'line_no' => null,
+                'confidence_bucket' => $this->confidenceBucket($row['confidence'] ?? null),
+                'confidence_score' => is_numeric($row['confidence'] ?? null) ? (float)$row['confidence'] : 0.0,
+                'source' => 'template_image_single_task_whitelist',
+                'value_saved' => false,
+                'label_x_ratio' => $this->ratio($row['label_x_ratio'] ?? 0),
+                'label_y_ratio' => $this->ratio($row['label_y_ratio'] ?? 0),
+                'label_w_ratio' => $this->ratio($row['label_w_ratio'] ?? 0),
+                'label_h_ratio' => $this->ratio($row['label_h_ratio'] ?? 0),
+                // PHP GD切り出し候補には固定ラベルではなく、対応する値欄の領域を保存する。
+                'x_ratio' => $this->ratio($row['value_x_ratio'] ?? $row['x_ratio'] ?? 0),
+                'y_ratio' => $this->ratio($row['value_y_ratio'] ?? $row['y_ratio'] ?? 0),
+                'w_ratio' => $this->ratio($row['value_w_ratio'] ?? $row['w_ratio'] ?? 0),
+                'h_ratio' => $this->ratio($row['value_h_ratio'] ?? $row['h_ratio'] ?? 0),
+            ];
+        }
+        return $labels;
+    }
+
+    private function whitelistedFieldKey(string $labelText, string $candidateKey): string
+    {
+        $candidateKey = trim($candidateKey);
+        $allowedKeys = array_values(self::LABEL_WHITELIST);
+        if ($candidateKey !== '' && in_array($candidateKey, $allowedKeys, true)) {
+            return $candidateKey;
+        }
+        $matches = [];
+        foreach (self::LABEL_WHITELIST as $label => $fieldKey) {
+            if ($labelText === $label || mb_stripos($labelText, $label) !== false) {
+                $matches[mb_strlen($label)] = $fieldKey;
+            }
+        }
+        if (!$matches) {
+            return '';
+        }
+        krsort($matches);
+        return (string)reset($matches);
+    }
+
+    /** @param array<int,array<string,mixed>> $a @param array<int,array<string,mixed>> $b @return array<int,array<string,mixed>> */
+    private function mergeTemplateLabels(array $a, array $b): array
+    {
+        $merged = [];
+        foreach (array_merge($a, $b) as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $key = (string)($row['field_key'] ?? '') . '|' . (string)($row['label_text'] ?? '') . '|' . (string)($row['source_section'] ?? '');
+            if ($key === '||') {
+                continue;
+            }
+            if (!isset($merged[$key]) || (float)($row['confidence_score'] ?? 0) > (float)($merged[$key]['confidence_score'] ?? 0)) {
+                $merged[$key] = $row;
+            }
+        }
+        return array_values($merged);
+    }
+
+    /** @param array<int,array<string,mixed>> $labels @param array<string,mixed> $context */
+    private function saveCandidateRegions(int $tenantId, int $parseJobId, array $labels, array $context): void
+    {
+        try {
+            $pdo = Db::knowledge();
+            if (!Db::tableExists($pdo, 'prescription_global_template_regions')) {
+                return;
+            }
+            $stmt = $pdo->prepare('INSERT INTO prescription_global_template_regions
+                (template_hash, line_signature, label_signature, field_key, field_label,
+                 x_ratio, y_ratio, w_ratio, h_ratio, margin_ratio, confidence_score,
+                 sample_count, status, enabled, source_stage, company_uid, branch_uid, tenant_id, parse_job_id, created_at, updated_at)
+                VALUES
+                (:template_hash, :line_signature, :label_signature, :field_key, :field_label,
+                 :x_ratio, :y_ratio, :w_ratio, :h_ratio, 0.010000, :confidence_score,
+                 1, "candidate", 0, "first_image_read", :company_uid, :branch_uid, :tenant_id, :parse_job_id, NOW(), NOW())
+                ON DUPLICATE KEY UPDATE
+                    x_ratio = ((x_ratio * sample_count) + VALUES(x_ratio)) / (sample_count + 1),
+                    y_ratio = ((y_ratio * sample_count) + VALUES(y_ratio)) / (sample_count + 1),
+                    w_ratio = ((w_ratio * sample_count) + VALUES(w_ratio)) / (sample_count + 1),
+                    h_ratio = ((h_ratio * sample_count) + VALUES(h_ratio)) / (sample_count + 1),
+                    confidence_score = GREATEST(confidence_score, VALUES(confidence_score)),
+                    sample_count = sample_count + 1,
+                    updated_at = NOW()');
+            foreach ($labels as $label) {
+                $w = $this->ratio($label['w_ratio'] ?? 0);
+                $h = $this->ratio($label['h_ratio'] ?? 0);
+                if ($w <= 0 || $h <= 0) {
+                    continue;
+                }
+                $stmt->execute([
+                    ':template_hash' => (string)($context['template_hash'] ?? ''),
+                    ':line_signature' => (string)($context['line_signature'] ?? ''),
+                    ':label_signature' => (string)($context['label_signature'] ?? ''),
+                    ':field_key' => (string)($label['field_key'] ?? ''),
+                    ':field_label' => (string)($label['label_text'] ?? ''),
+                    ':x_ratio' => $this->ratio($label['x_ratio'] ?? 0),
+                    ':y_ratio' => $this->ratio($label['y_ratio'] ?? 0),
+                    ':w_ratio' => $w,
+                    ':h_ratio' => $h,
+                    ':confidence_score' => is_numeric($label['confidence_score'] ?? null) ? (float)$label['confidence_score'] : 0.0,
+                    ':company_uid' => current_company_uid(),
+                    ':branch_uid' => current_branch_uid(),
+                    ':tenant_id' => $tenantId,
+                    ':parse_job_id' => $parseJobId,
+                ]);
+            }
+        } catch (Throwable) {
+        }
+    }
+
+    private function ratio(mixed $value): float
+    {
+        return is_numeric($value) ? max(0.0, min(1.0, (float)$value)) : 0.0;
     }
 
     /** @param array<int,array<string,mixed>> $selectedFields @return array<int,array<string,mixed>> */

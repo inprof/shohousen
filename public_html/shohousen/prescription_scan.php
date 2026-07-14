@@ -10,7 +10,7 @@ View::header('処方箋読込');
 <link rel="stylesheet" href="<?= h(app_url('/assets/css/prescription_scan.css')) ?>">
 <section class="page-title with-back">
   <a class="back-link" href="<?= h(app_url('/menu.php')) ?>">←</a>
-  <div><h1>処方箋読込</h1><p>スマホ/iPadで処方箋を撮影し、OpenAI APIで最小解析します。補助学習・再解析・AI項目配置は切り離し、OCR読取と項目JSON化だけを確認します。</p></div>
+  <div><h1>処方箋読込</h1><p>画像の文字起こしとテンプレート構造を別々に取得し、患者・保険・公費・医療機関・薬剤を1項目1タスクで抽出して、1画像1JSONへ統合します。</p></div>
   <a class="btn ghost" href="<?= h(app_url('/prescription_json_viewer.php')) ?>">DB内JSON確認</a>
 </section>
 

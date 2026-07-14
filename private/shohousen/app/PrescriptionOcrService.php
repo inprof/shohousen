@@ -66,8 +66,8 @@ final class PrescriptionOcrService
             ':source_type' => in_array($sourceType, ['camera', 'file'], true) ? $sourceType : 'file',
             ':storage_file_id' => $stored['storage_file_id'],
             ':model_name' => $modelSummaryText,
-            ':prompt_version' => 'prescription_minimal_4stage_v1',
-            ':schema_version' => 'prescription_schema_v1',
+            ':prompt_version' => 'prescription_single_task_v1',
+            ':schema_version' => 'prescription_one_image_one_json_v1',
             ':created_by' => (int)$user['id'],
         ]);
         $jobId = (int)$pdo->lastInsertId();
@@ -104,8 +104,8 @@ final class PrescriptionOcrService
         try {
             $pdo->prepare('UPDATE prescription_parse_jobs SET status = "analyzing" WHERE id = :id')->execute([':id' => $jobId]);
 
-            // 最小解析では、補助学習/テンプレートヒントは渡さない。
-            $ai = $openaiClient->extractFromImage($ocrStored['path'], $ocrStored['mime_type'], null);
+            // 低価格モデルは、画像OCR・テンプレート構造・各項目を単一タスクへ分離する。
+            $ai = $this->extractWithConfiguredPipeline($openaiClient, $ocrStored['path'], $ocrStored['mime_type']);
             $openaiMs = self::elapsedMs($openaiStart);
             $normalized = is_array($ai['normalized'] ?? null) ? $ai['normalized'] : [];
             $normalized['_ocr_raw_text'] = (string)($ai['ocr_raw_text'] ?? '');
@@ -132,6 +132,67 @@ final class PrescriptionOcrService
                     'auto_field_retry_count' => (int)($normalized['_auto_field_retry_count'] ?? 0),
                 ]);
             }
+
+            // 初回読取時点で、個人値を含まない枠画像・固定ラベル・候補座標を補助学習DBへ保存する。
+            if (class_exists('PrescriptionTemplateMaskService')) {
+                try {
+                    $templateLearning = (new PrescriptionTemplateMaskService())->saveInitialTemplateLearningAssets(
+                        $tenantId,
+                        $jobId,
+                        $stored,
+                        is_array($ai['template_observation'] ?? null) ? $ai['template_observation'] : [],
+                        is_array($ai['ocr_structured_json'] ?? null) ? $ai['ocr_structured_json'] : []
+                    );
+                    $normalized['_template_learning_ingest'] = $templateLearning;
+                } catch (Throwable $templateError) {
+                    $normalized['_template_learning_ingest'] = [
+                        'saved' => false,
+                        'error' => $templateError->getMessage(),
+                    ];
+                }
+            }
+
+            // 患者実値を含む解析結果は、補助学習DBではなく拠点private storageへ1画像1JSONで保存する。
+            if (class_exists('PrescriptionImageJsonService')) {
+                try {
+                    $imageJson = (new PrescriptionImageJsonService())->save(
+                        $tenantId,
+                        $jobId,
+                        (int)$user['id'],
+                        $stored,
+                        [
+                            'pipeline' => [
+                                'mode' => (string)($ai['raw']['pipeline_mode'] ?? 'legacy'),
+                                'version' => (string)($ai['raw']['pipeline_version'] ?? ''),
+                                'models' => $ai['models'] ?? [],
+                                'usage_summary' => $ai['raw']['usage_summary'] ?? [],
+                            ],
+                            'source_image' => [
+                                'storage_file_id' => (int)($stored['storage_file_id'] ?? 0),
+                                'original_filename' => (string)($stored['original_filename'] ?? ''),
+                                'mime_type' => (string)($stored['mime_type'] ?? ''),
+                                'width' => $stored['width'] ?? null,
+                                'height' => $stored['height'] ?? null,
+                                'size' => (int)($stored['size'] ?? 0),
+                                'sha256' => (string)($stored['sha256'] ?? ''),
+                            ],
+                            'ocr_raw_text' => (string)($ai['ocr_raw_text'] ?? ''),
+                            'ocr_structured_json' => $ai['ocr_structured_json'] ?? [],
+                            'template_observation' => $ai['template_observation'] ?? [],
+                            'single_task_results' => $ai['single_task_results'] ?? [],
+                            'ai_normalized_json' => $aiNormalized,
+                            'php_validated_json' => $normalized,
+                        ]
+                    );
+                    $normalized['_image_json_document'] = $imageJson;
+                } catch (Throwable $jsonError) {
+                    $normalized['_image_json_document'] = [
+                        'saved' => false,
+                        'error' => $jsonError->getMessage(),
+                    ];
+                }
+            }
+
             if (class_exists('PrescriptionOcrDatasetService')) {
                 (new PrescriptionOcrDatasetService())->saveEvent($tenantId, $jobId, null, 'ai_read_attempt_1', [
                     'original_storage_file' => $stored,
@@ -158,6 +219,22 @@ final class PrescriptionOcrService
                 'minimal_analysis' => true,
                 'created_by_user_id' => (int)$user['id'],
             ]);
+            if (!empty($ai['template_observation'])) {
+                $debug->saveSnapshot($tenantId, $jobId, null, 'template_observation', '初回画像読取: 個人値を含まないテンプレート構造候補', $ai['template_observation'], [
+                    'model_name' => (string)($ai['models']['template'] ?? $ai['model'] ?? $modelSummaryText),
+                    'model_tier' => $modelSummary,
+                    'privacy_level' => 'fixed_labels_and_geometry_only_no_values',
+                    'created_by_user_id' => (int)$user['id'],
+                ]);
+            }
+            if (!empty($ai['single_task_results'])) {
+                $debug->saveSnapshot($tenantId, $jobId, null, 'single_task_results', '単一タスク項目抽出: 1リクエスト1項目の統合前結果', $ai['single_task_results'], [
+                    'model_name' => (string)($ai['models']['structure'] ?? $ai['model'] ?? $modelSummaryText),
+                    'model_tier' => $modelSummary,
+                    'task_mode' => 'one_request_one_field',
+                    'created_by_user_id' => (int)$user['id'],
+                ]);
+            }
             $debug->saveSnapshot($tenantId, $jobId, null, 'prescription_item_json', '3. 処方箋項目JSON: OCRから患者・保険・薬品へ項目分け', $ai['prescription_item_json'] ?? $normalized, [
                 'model_name' => (string)($ai['models']['structure'] ?? $ai['model'] ?? $modelSummaryText),
                 'model_tier' => $modelSummary,
@@ -331,7 +408,7 @@ final class PrescriptionOcrService
         $pdo->prepare('UPDATE prescription_parse_jobs SET status = "analyzing", updated_at = NOW() WHERE id = :id')->execute([':id' => $jobId]);
 
         try {
-            $ai = $openaiClient->extractFromImage($stored['path'], $stored['mime_type'], null);
+            $ai = $this->extractWithConfiguredPipeline($openaiClient, $stored['path'], $stored['mime_type']);
             $aiNormalized = is_array($ai['normalized'] ?? null) ? $ai['normalized'] : [];
             $newNormalized = $aiNormalized;
             $newNormalized['_ocr_raw_text'] = (string)($ai['ocr_raw_text'] ?? '');
@@ -345,6 +422,40 @@ final class PrescriptionOcrService
                 'ocr_storage_file_id' => (int)$stored['storage_file_id'],
                 'ocr_image_bytes' => (int)$stored['size'],
             ]);
+
+            if (class_exists('PrescriptionImageJsonService')) {
+                try {
+                    $imageJson = (new PrescriptionImageJsonService())->save(
+                        $tenantId,
+                        $jobId,
+                        (int)$user['id'],
+                        $stored,
+                        [
+                            'pipeline' => [
+                                'mode' => (string)($ai['raw']['pipeline_mode'] ?? 'legacy'),
+                                'version' => (string)($ai['raw']['pipeline_version'] ?? ''),
+                                'models' => $ai['models'] ?? [],
+                                'usage_summary' => $ai['raw']['usage_summary'] ?? [],
+                                'manual_retry_attempt' => $attemptNo,
+                            ],
+                            'source_image' => $stored,
+                            'ocr_raw_text' => (string)($ai['ocr_raw_text'] ?? ''),
+                            'ocr_structured_json' => $ai['ocr_structured_json'] ?? [],
+                            'template_observation' => $ai['template_observation'] ?? [],
+                            'single_task_results' => $ai['single_task_results'] ?? [],
+                            'ai_normalized_json' => $aiNormalized,
+                            'php_validated_json' => $newNormalized,
+                            'merged_display_json' => $merged,
+                        ]
+                    );
+                    $merged['_image_json_document'] = $imageJson;
+                } catch (Throwable $jsonError) {
+                    $merged['_image_json_document'] = [
+                        'saved' => false,
+                        'error' => $jsonError->getMessage(),
+                    ];
+                }
+            }
 
             $debug = new PrescriptionIoDebugService();
             $debug->saveSnapshot($tenantId, $jobId, null, 'ai_retry_attempt_' . $attemptNo, 'AI再読み込み' . $attemptNo . '回目: OCR/項目JSON/PHP検証', [
@@ -423,6 +534,17 @@ final class PrescriptionOcrService
         }
         $job['normalized'] = json_decode((string)($job['normalized_json'] ?? '{}'), true) ?: [];
         return $job;
+    }
+
+
+    /** @return array<string,mixed> */
+    private function extractWithConfiguredPipeline(OpenAiPrescriptionClient $client, string $imagePath, string $mimeType): array
+    {
+        if ((bool)app_config('prescription_single_task_analysis.enabled', true)
+            && class_exists('PrescriptionSingleTaskExtractionService')) {
+            return (new PrescriptionSingleTaskExtractionService())->extract($client, $imagePath, $mimeType, null);
+        }
+        return $client->extractFromImage($imagePath, $mimeType, null);
     }
 
     private function saveCaptureQuality(int $jobId, int $tenantId, string $companyUid, string $branchUid, array $stored): void

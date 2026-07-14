@@ -78,6 +78,8 @@ require_once __DIR__ . '/Repositories.php';
 require_once __DIR__ . '/DrugNameMasterService.php';
 require_once __DIR__ . '/DrugDictionaryService.php';
 require_once __DIR__ . '/OpenAiPrescriptionClient.php';
+require_once __DIR__ . '/PrescriptionSingleTaskExtractionService.php';
+require_once __DIR__ . '/PrescriptionImageJsonService.php';
 require_once __DIR__ . '/PrescriptionImagePreprocessor.php';
 require_once __DIR__ . '/PrescriptionLayoutRegionRepository.php';
 require_once __DIR__ . '/PrescriptionFieldCropService.php';

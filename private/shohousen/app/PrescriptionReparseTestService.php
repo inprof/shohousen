@@ -50,7 +50,11 @@ final class PrescriptionReparseTestService
         ]);
 
         $started = microtime(true);
-        $ai = $this->openai->extractFromImage((string)$image['path'], (string)$image['mime_type'], $this->templateHintFromJob($job));
+        $singleTaskMode = (bool)app_config('prescription_single_task_analysis.enabled', true)
+            && class_exists('PrescriptionSingleTaskExtractionService');
+        $ai = $singleTaskMode
+            ? (new PrescriptionSingleTaskExtractionService())->extract($this->openai, (string)$image['path'], (string)$image['mime_type'], $this->templateHintFromJob($job))
+            : $this->openai->extractFromImage((string)$image['path'], (string)$image['mime_type'], $this->templateHintFromJob($job));
         $this->debug->saveSnapshot($tenantId, $parseJobId, $prescriptionId, 'ai_reparse_after_learning_raw', '再解析後: OpenAI生レスポンス', $ai['raw'], [
             'model_name' => $ai['model'],
             'created_by_user_id' => (int)$user['id'],
@@ -66,7 +70,11 @@ final class PrescriptionReparseTestService
             'created_by_user_id' => (int)$user['id'],
         ]);
 
-        $mapping = $this->aiRuleMapper->mapForDisplay($normalizedAfterCorrection, $this->templateHintFromJob($job), ['mode' => 'reparse_after_learning'], $parseJobId, $tenantId);
+        if ($singleTaskMode) {
+            $mapping = ['used_ai' => false, 'error' => null, 'normalized' => $normalizedAfterCorrection];
+        } else {
+            $mapping = $this->aiRuleMapper->mapForDisplay($normalizedAfterCorrection, $this->templateHintFromJob($job), ['mode' => 'reparse_after_learning'], $parseJobId, $tenantId);
+        }
         $mapped = $mapping['normalized'];
         $this->debug->saveSnapshot($tenantId, $parseJobId, $prescriptionId, 'ai_reparse_after_learning_mapped_display', '再解析後: AI項目化後JSON', [
             'used_ai' => $mapping['used_ai'],
